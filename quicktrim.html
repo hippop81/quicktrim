@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quick Trim — 簡易動画カット</title>
+<style>
+  :root{
+    --paper:#F6F4EE;
+    --surface:#FFFFFF;
+    --ink:#22221F;
+    --ink-soft:#5B5A54;
+    --hairline:#DEDAD0;
+    --lime:#C7E93E;
+    --lime-deep:#5A6B12;
+    --lime-soft:#EEF6CE;
+    --cut-bg:#E7E4DC;
+    --cut-text:#8C887D;
+    --danger:#D85A30;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN",sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    min-height:100vh;
+  }
+  .shell{
+    max-width:980px;
+    margin:0 auto;
+    padding:32px 24px 80px;
+  }
+  header.top{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom:28px;
+    border-bottom:1px solid var(--hairline);
+    padding-bottom:16px;
+  }
+  .brand{
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+  }
+  .brand .mark{
+    font-size:13px;
+    letter-spacing:.08em;
+    color:var(--lime-deep);
+    background:var(--lime-soft);
+    padding:3px 8px;
+    border-radius:6px;
+    font-weight:600;
+  }
+  h1{
+    font-size:20px;
+    font-weight:600;
+    margin:0;
+    letter-spacing:.01em;
+  }
+  .tagline{
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+
+  /* dropzone / loaded state */
+  .dropzone{
+    border:1.5px dashed var(--hairline);
+    border-radius:14px;
+    background:var(--surface);
+    padding:56px 24px;
+    text-align:center;
+    cursor:pointer;
+    transition:border-color .15s, background .15s;
+  }
+  .dropzone:hover, .dropzone.drag{
+    border-color:var(--lime-deep);
+    background:var(--lime-soft);
+  }
+  .dropzone .icon{
+    font-size:30px;
+    margin-bottom:10px;
+    color:var(--ink-soft);
+  }
+  .dropzone p{margin:4px 0;}
+  .dropzone .hint{font-size:12.5px;color:var(--ink-soft);}
+  input[type=file]{display:none;}
+
+  .workspace{display:none;}
+  .workspace.active{display:block;}
+
+  .video-frame{
+    background:#000;
+    border-radius:12px;
+    overflow:hidden;
+    aspect-ratio:16/9;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    margin-bottom:14px;
+  }
+  video{width:100%;height:100%;object-fit:contain;background:#000;}
+
+  .transport{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    margin-bottom:20px;
+  }
+  button.icon-btn{
+    border:1px solid var(--hairline);
+    background:var(--surface);
+    border-radius:8px;
+    width:38px;height:38px;
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;
+    font-size:16px;
+    color:var(--ink);
+  }
+  button.icon-btn:hover{background:var(--lime-soft);border-color:var(--lime-deep);}
+  button.icon-btn:active{transform:scale(.96);}
+  .time-readout{
+    font-size:13px;
+    color:var(--ink-soft);
+    font-variant-numeric:tabular-nums;
+    min-width:128px;
+  }
+  .speed-select{
+    margin-left:auto;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    border:1px solid var(--hairline);
+    border-radius:8px;
+    padding:6px 10px;
+    background:var(--surface);
+  }
+
+  /* timeline */
+  .timeline-section{margin-bottom:22px;}
+  .timeline-label{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    margin-bottom:8px;
+  }
+  .timeline-label .legend{display:flex;gap:14px;}
+  .legend-item{display:flex;align-items:center;gap:6px;}
+  .swatch{width:10px;height:10px;border-radius:3px;display:inline-block;}
+  .swatch.keep{background:var(--lime);}
+  .swatch.cut{background:var(--cut-bg);border:1px solid var(--hairline);}
+
+  .timeline{
+    position:relative;
+    height:88px;
+    background:var(--surface);
+    border:1px solid var(--hairline);
+    border-radius:10px;
+    overflow:hidden;
+    cursor:pointer;
+    user-select:none;
+  }
+  .waveform{
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    gap:2px;
+    padding:0 6px;
+    pointer-events:none;
+  }
+  .wave-bar{
+    flex:1;
+    background:var(--hairline);
+    border-radius:1px;
+    min-width:1px;
+  }
+  .region{
+    position:absolute;
+    top:0;bottom:0;
+    background:var(--cut-bg);
+    transition:background .1s;
+    pointer-events:none;
+  }
+  .region.keep{background:rgba(199,233,62,.35);}
+  .region.silence-suggest{
+    background:repeating-linear-gradient(45deg, rgba(216,90,48,.18) 0 6px, rgba(216,90,48,.05) 6px 12px);
+    border-left:2px solid var(--danger);
+    border-right:2px solid var(--danger);
+  }
+  .region .handle{
+    position:absolute;
+    top:0;bottom:0;
+    width:8px;
+    cursor:ew-resize;
+    background:transparent;
+  }
+  .region .handle.left{left:-4px;}
+  .region .handle.right{right:-4px;}
+  .region:hover .handle{background:rgba(0,0,0,.08);}
+
+  .playhead{
+    position:absolute;
+    top:0;bottom:0;
+    width:2px;
+    background:var(--ink);
+    pointer-events:none;
+    z-index:5;
+  }
+  .playhead::before{
+    content:"";
+    position:absolute;
+    top:-1px;left:-4px;
+    width:10px;height:10px;
+    background:var(--ink);
+    border-radius:50%;
+  }
+
+  .clip{
+    position:absolute;
+    top:0;bottom:0;
+    cursor:pointer;
+    box-sizing:border-box;
+  }
+  .clip:hover{background:rgba(34,34,31,.05);}
+  .clip.selected{
+    background:rgba(34,34,31,.10);
+    outline:2px solid var(--ink);
+    outline-offset:-2px;
+    z-index:3;
+  }
+  .clip.cut-applied{
+    background:rgba(216,90,48,.06);
+  }
+  .clip-boundary{
+    position:absolute;
+    top:0;bottom:0;
+    width:2px;
+    background:var(--ink-soft);
+    z-index:4;
+    pointer-events:none;
+  }
+  .clip-boundary::after{
+    content:"";
+    position:absolute;
+    top:50%;left:50%;
+    transform:translate(-50%,-50%);
+    width:8px;height:8px;
+    border-radius:50%;
+    background:var(--surface);
+    border:1.5px solid var(--ink-soft);
+  }
+
+  .selection-draft{
+    position:absolute;
+    top:0;bottom:0;
+    background:rgba(34,34,31,.12);
+    border-left:1.5px solid var(--ink);
+    border-right:1.5px solid var(--ink);
+    pointer-events:none;
+    display:none;
+  }
+
+  .timeline-actions{
+    display:flex;
+    gap:8px;
+    margin-top:10px;
+    flex-wrap:wrap;
+  }
+  .hint-row{
+    font-size:12px;
+    color:var(--ink-soft);
+    margin-top:8px;
+  }
+  button.action{
+    border:1px solid var(--hairline);
+    background:var(--surface);
+    border-radius:8px;
+    padding:8px 14px;
+    font-size:13px;
+    cursor:pointer;
+    color:var(--ink);
+    display:flex;align-items:center;gap:6px;
+  }
+  button.action:hover{border-color:var(--lime-deep);background:var(--lime-soft);}
+  button.action.primary{
+    background:var(--ink);
+    color:var(--surface);
+    border-color:var(--ink);
+  }
+  button.action.primary:hover{background:#3a3a35;}
+  button.action.danger-outline{color:var(--danger);}
+  button.action.danger-outline:hover{background:#FBEAE3;border-color:var(--danger);}
+  button.action:disabled{opacity:.4;cursor:not-allowed;}
+
+  /* silence detection panel */
+  .silence-panel{
+    background:var(--surface);
+    border:1px solid var(--hairline);
+    border-radius:12px;
+    padding:16px 18px;
+    margin-bottom:22px;
+  }
+  .silence-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:4px;
+  }
+  .silence-head h2{font-size:14.5px;font-weight:600;margin:0;}
+  .silence-head .sub{font-size:12.5px;color:var(--ink-soft);margin-top:2px;}
+  .silence-controls{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-top:12px;
+  }
+  .silence-controls label{font-size:12.5px;color:var(--ink-soft);white-space:nowrap;}
+  input[type=range]{flex:1;}
+  .silence-status{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    margin-top:10px;
+    min-height:18px;
+  }
+  .candidate-list{
+    margin-top:12px;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    max-height:180px;
+    overflow-y:auto;
+  }
+  .candidate-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:8px 10px;
+    border:1px solid var(--hairline);
+    border-radius:8px;
+    font-size:12.5px;
+  }
+  .candidate-row .dur{color:var(--ink-soft);min-width:56px;}
+  .candidate-row .range{flex:1;font-variant-numeric:tabular-nums;}
+  .candidate-row button{
+    border:none;background:transparent;cursor:pointer;
+    font-size:12px;padding:4px 8px;border-radius:6px;
+  }
+  .candidate-row button.accept{color:var(--lime-deep);background:var(--lime-soft);}
+  .candidate-row button.skip{color:var(--ink-soft);}
+  .candidate-row button.accept:hover{background:var(--lime);}
+
+  /* cut list */
+  .cutlist-section h2{font-size:14.5px;font-weight:600;margin:0 0 10px;}
+  .cutlist{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .cutlist-row{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    background:var(--surface);
+    border:1px solid var(--hairline);
+    border-radius:10px;
+    padding:10px 14px;
+  }
+  .cutlist-row .tag{
+    font-size:11px;
+    font-weight:600;
+    padding:3px 8px;
+    border-radius:6px;
+    background:var(--lime-soft);
+    color:var(--lime-deep);
+  }
+  .cutlist-row .range{
+    font-size:13px;
+    font-variant-numeric:tabular-nums;
+    flex:1;
+  }
+  .cutlist-row .dur{
+    font-size:12.5px;
+    color:var(--ink-soft);
+  }
+  .cutlist-row .remove{
+    border:none;background:transparent;color:var(--ink-soft);
+    cursor:pointer;font-size:15px;padding:4px;
+  }
+  .cutlist-row .remove:hover{color:var(--danger);}
+  .empty-note{
+    font-size:13px;
+    color:var(--ink-soft);
+    padding:16px 0;
+  }
+
+  .summary-bar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-top:18px;
+    padding-top:16px;
+    border-top:1px solid var(--hairline);
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  .summary-bar .total{
+    font-weight:600;
+    color:var(--ink);
+  }
+
+  .export-panel{
+    margin-top:20px;
+    padding-top:18px;
+    border-top:1px solid var(--hairline);
+  }
+  .export-mode-row{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+    margin-bottom:14px;
+  }
+  .mode-option{
+    display:flex;
+    gap:10px;
+    align-items:flex-start;
+    border:1px solid var(--hairline);
+    border-radius:10px;
+    padding:12px 14px;
+    cursor:pointer;
+    background:var(--surface);
+  }
+  .mode-option:has(input:checked){
+    border-color:var(--lime-deep);
+    background:var(--lime-soft);
+  }
+  .mode-option input{margin-top:3px;}
+  .mode-title{font-size:13.5px;font-weight:600;}
+  .mode-sub{font-size:12px;color:var(--ink-soft);margin-top:2px;}
+
+  .export-row{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .export-progress{
+    margin-top:14px;
+  }
+  .progress-track{
+    height:8px;
+    background:var(--cut-bg);
+    border-radius:4px;
+    overflow:hidden;
+  }
+  .progress-fill{
+    height:100%;
+    width:0%;
+    background:var(--lime-deep);
+    transition:width .15s;
+  }
+  .progress-label{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    margin-top:6px;
+  }
+
+  .export-result{
+    margin-top:14px;
+    padding:14px 16px;
+    background:var(--lime-soft);
+    border:1px solid var(--lime-deep);
+    border-radius:10px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .export-result .info{font-size:13px;color:var(--lime-deep);}
+  .export-result a.download-link{
+    background:var(--ink);
+    color:var(--surface);
+    text-decoration:none;
+    padding:8px 16px;
+    border-radius:8px;
+    font-size:13px;
+  }
+  .export-result a.download-link:hover{background:#3a3a35;}
+
+  .toast{
+    position:fixed;
+    bottom:24px;
+    left:50%;
+    transform:translateX(-50%) translateY(8px);
+    background:var(--ink);
+    color:var(--surface);
+    padding:10px 18px;
+    border-radius:8px;
+    font-size:13px;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .2s, transform .2s;
+    z-index:50;
+  }
+  .toast.show{
+    opacity:1;
+    transform:translateX(-50%) translateY(0);
+  }
+
+  @media (max-width:600px){
+    .shell{padding:20px 14px 60px;}
+    .speed-select{margin-left:0;}
+    .transport{flex-wrap:wrap;}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="top">
+    <div class="brand">
+      <h1>Quick Trim</h1>
+      <span class="mark">MVP v0.1</span>
+    </div>
+    <div class="tagline">DaVinciの前に、いらない部分だけ抜く</div>
+  </header>
+
+  <div class="dropzone" id="dropzone">
+    <div class="icon">▷</div>
+    <p>動画ファイルをここにドロップ、またはクリックして選択</p>
+    <p class="hint">MP4 / MOV / WebM 対応・ブラウザ内処理のみ（外部送信なし）</p>
+    <input type="file" id="fileInput" accept="video/*">
+  </div>
+
+  <div class="workspace" id="workspace">
+
+    <div class="video-frame">
+      <video id="video" playsinline></video>
+    </div>
+
+    <div class="transport">
+      <button class="icon-btn" id="playBtn" aria-label="再生/一時停止">▶</button>
+      <button class="icon-btn" id="back5" aria-label="5秒戻る">«</button>
+      <button class="icon-btn" id="fwd5" aria-label="5秒進む">»</button>
+      <span class="time-readout" id="timeReadout">00:00.0 / 00:00.0</span>
+      <select class="speed-select" id="speedSelect">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="1.5">1.5x</option>
+        <option value="2">2x</option>
+      </select>
+    </div>
+
+    <div class="timeline-section">
+      <div class="timeline-label">
+        <span>タイムライン（ドラッグして削除区間を選択）</span>
+        <span class="legend">
+          <span class="legend-item"><span class="swatch keep"></span>残す</span>
+          <span class="legend-item"><span class="swatch cut"></span>削除済み</span>
+        </span>
+      </div>
+      <div class="timeline" id="timeline">
+        <div class="waveform" id="waveform"></div>
+        <div class="selection-draft" id="selectionDraft"></div>
+        <div class="playhead" id="playhead" style="left:0;"></div>
+      </div>
+      <div class="timeline-actions">
+        <button class="action primary" id="markCutBtn" disabled>選択範囲を削除区間に追加</button>
+        <button class="action" id="splitBtn">ここで分割</button>
+        <button class="action danger-outline" id="deleteClipBtn" disabled>選択中のクリップを削除</button>
+        <button class="action danger-outline" id="clearAllBtn">すべてリセット</button>
+      </div>
+      <div class="hint-row" id="clipHint">クリップをクリックして選択、または分割してから不要な方をクリック→削除</div>
+    </div>
+
+    <div class="silence-panel">
+      <div class="silence-head">
+        <div>
+          <h2>無音区間の自動検出</h2>
+          <div class="sub">音声の振幅を解析して、無音っぽい箇所を候補として提示します</div>
+        </div>
+        <button class="action" id="analyzeBtn">解析する</button>
+      </div>
+      <div class="silence-controls">
+        <label>感度（しきい値）</label>
+        <input type="range" id="thresholdSlider" min="1" max="10" value="4">
+        <label id="thresholdReadout">4</label>
+      </div>
+      <div class="silence-controls">
+        <label>最短無音長</label>
+        <input type="range" id="minLenSlider" min="3" max="20" value="6">
+        <label id="minLenReadout">0.6秒</label>
+      </div>
+      <div class="silence-status" id="silenceStatus">まだ解析していません</div>
+      <div class="candidate-list" id="candidateList"></div>
+    </div>
+
+    <div class="cutlist-section">
+      <h2>削除区間リスト</h2>
+      <div class="cutlist" id="cutlist">
+        <div class="empty-note">まだ削除区間がありません。タイムラインをドラッグして選択してください。</div>
+      </div>
+    </div>
+
+    <div class="summary-bar">
+      <span>元の長さ：<span id="origDur">--</span></span>
+      <span>削除合計：<span id="cutTotal">--</span></span>
+      <span class="total">書き出し後：<span id="finalDur">--</span></span>
+    </div>
+
+    <div class="export-panel">
+      <div class="export-mode-row">
+        <label class="mode-option">
+          <input type="radio" name="exportMode" value="fast" checked>
+          <div>
+            <div class="mode-title">高速書き出し</div>
+            <div class="mode-sub">再エンコードなし・速いが境界が前後数フレームずれる場合あり</div>
+          </div>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="exportMode" value="precise">
+          <div>
+            <div class="mode-title">正確に書き出し</div>
+            <div class="mode-sub">再エンコードあり・フレーム単位で正確だが時間がかかる</div>
+          </div>
+        </label>
+      </div>
+      <div class="export-row">
+        <button class="action primary" id="exportBtn">この内容で書き出す</button>
+        <button class="action" id="previewSkipBtn">スキップ再生プレビュー</button>
+        <button class="action" id="newFileBtn">別のファイルを開く</button>
+      </div>
+      <div class="export-progress" id="exportProgress" style="display:none;">
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        <div class="progress-label" id="progressLabel">準備中…</div>
+      </div>
+      <div class="export-result" id="exportResult" style="display:none;"></div>
+    </div>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+(function(){
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const workspace = document.getElementById('workspace');
+  const video = document.getElementById('video');
+  const playBtn = document.getElementById('playBtn');
+  const back5 = document.getElementById('back5');
+  const fwd5 = document.getElementById('fwd5');
+  const timeReadout = document.getElementById('timeReadout');
+  const speedSelect = document.getElementById('speedSelect');
+  const timeline = document.getElementById('timeline');
+  const waveform = document.getElementById('waveform');
+  const playhead = document.getElementById('playhead');
+  const selectionDraft = document.getElementById('selectionDraft');
+  const markCutBtn = document.getElementById('markCutBtn');
+  const splitBtn = document.getElementById('splitBtn');
+  const deleteClipBtn = document.getElementById('deleteClipBtn');
+  const clearAllBtn = document.getElementById('clearAllBtn');
+  const cutlistEl = document.getElementById('cutlist');
+  const origDurEl = document.getElementById('origDur');
+  const cutTotalEl = document.getElementById('cutTotal');
+  const finalDurEl = document.getElementById('finalDur');
+  const exportBtn = document.getElementById('exportBtn');
+  const previewSkipBtn = document.getElementById('previewSkipBtn');
+  const newFileBtn = document.getElementById('newFileBtn');
+  const toast = document.getElementById('toast');
+  const analyzeBtn = document.getElementById('analyzeBtn');
+  const thresholdSlider = document.getElementById('thresholdSlider');
+  const thresholdReadout = document.getElementById('thresholdReadout');
+  const minLenSlider = document.getElementById('minLenSlider');
+  const minLenReadout = document.getElementById('minLenReadout');
+  const silenceStatus = document.getElementById('silenceStatus');
+  const candidateList = document.getElementById('candidateList');
+
+  let duration = 0;
+  let cuts = []; // {start, end} -- 確定した削除区間
+  let boundaries = []; // 分割点（0とdurationは含まない、中間点のみ）
+  let selectedClipIndex = null; // 現在選択中のクリップのインデックス
+  let dragState = null; // {startX, startTime}
+  let audioBuffer = null;
+  let silenceCandidates = []; // {start, end}
+  let objectUrl = null;
+  let currentFile = null; // 読み込んだFileオブジェクト（書き出し時に使用）
+
+  function fmt(t){
+    if(!isFinite(t) || t < 0) t = 0;
+    const m = Math.floor(t/60);
+    const s = (t - m*60).toFixed(1);
+    return String(m).padStart(2,'0')+':'+String(s).padStart(4,'0');
+  }
+
+  function showToast(msg){
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(()=>toast.classList.remove('show'), 2200);
+  }
+
+  // ---- file load ----
+  dropzone.addEventListener('click', ()=>fileInput.click());
+  ['dragover','dragenter'].forEach(ev=>{
+    dropzone.addEventListener(ev, e=>{e.preventDefault(); dropzone.classList.add('drag');});
+  });
+  ['dragleave','drop'].forEach(ev=>{
+    dropzone.addEventListener(ev, e=>{e.preventDefault(); dropzone.classList.remove('drag');});
+  });
+  dropzone.addEventListener('drop', e=>{
+    const f = e.dataTransfer.files[0];
+    if(f) loadFile(f);
+  });
+  fileInput.addEventListener('change', e=>{
+    const f = e.target.files[0];
+    if(f) loadFile(f);
+  });
+
+  function loadFile(file){
+    if(objectUrl) URL.revokeObjectURL(objectUrl);
+    objectUrl = URL.createObjectURL(file);
+    currentFile = file;
+    video.src = objectUrl;
+    video.load();
+    video.addEventListener('loadedmetadata', function onMeta(){
+      duration = video.duration;
+      cuts = [];
+      boundaries = [];
+      selectedClipIndex = null;
+      silenceCandidates = [];
+      candidateList.innerHTML = '';
+      silenceStatus.textContent = 'まだ解析していません';
+      origDurEl.textContent = fmt(duration);
+      buildPlaceholderWaveform();
+      renderClips();
+      renderCuts();
+      updateSummary();
+      document.getElementById('exportResult').style.display = 'none';
+      document.getElementById('exportProgress').style.display = 'none';
+      dropzone.style.display = 'none';
+      workspace.classList.add('active');
+      video.removeEventListener('loadedmetadata', onMeta);
+      // try real waveform via WebAudio in background
+      decodeAudioForWaveform(file);
+    }, {once:true});
+  }
+
+  newFileBtn.addEventListener('click', ()=>{
+    workspace.classList.remove('active');
+    dropzone.style.display = '';
+    video.pause();
+    video.removeAttribute('src');
+    fileInput.value = '';
+    currentFile = null;
+  });
+
+  // ---- transport ----
+  playBtn.addEventListener('click', ()=>{
+    if(video.paused){ video.play(); playBtn.textContent='❚❚'; }
+    else { video.pause(); playBtn.textContent='▶'; }
+  });
+  video.addEventListener('pause', ()=>{playBtn.textContent='▶';});
+  video.addEventListener('play', ()=>{playBtn.textContent='❚❚';});
+  back5.addEventListener('click', ()=>{ video.currentTime = Math.max(0, video.currentTime-5); });
+  fwd5.addEventListener('click', ()=>{ video.currentTime = Math.min(duration, video.currentTime+5); });
+  speedSelect.addEventListener('change', ()=>{ video.playbackRate = parseFloat(speedSelect.value); });
+
+  video.addEventListener('timeupdate', ()=>{
+    timeReadout.textContent = fmt(video.currentTime)+' / '+fmt(duration);
+    updatePlayhead();
+    // skip-preview: if currently inside a cut region while playing, jump past it
+    if(!video.paused){
+      for(const c of cuts){
+        if(video.currentTime >= c.start && video.currentTime < c.end - 0.05){
+          video.currentTime = c.end;
+          break;
+        }
+      }
+    }
+  });
+
+  function updatePlayhead(){
+    const pct = duration ? (video.currentTime/duration)*100 : 0;
+    playhead.style.left = pct+'%';
+  }
+
+  // ---- waveform (placeholder bars, replaced if decode succeeds) ----
+  function buildPlaceholderWaveform(){
+    waveform.innerHTML = '';
+    const n = 120;
+    for(let i=0;i<n;i++){
+      const bar = document.createElement('div');
+      bar.className='wave-bar';
+      const h = 20+Math.random()*55;
+      bar.style.height = h+'%';
+      waveform.appendChild(bar);
+    }
+  }
+
+  function decodeAudioForWaveform(file){
+    const reader = new FileReader();
+    reader.onload = function(e){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC) return;
+      const ctx = new AC();
+      ctx.decodeAudioData(e.target.result.slice(0), function(buf){
+        audioBuffer = buf;
+        drawRealWaveform(buf);
+      }, function(){ /* decode failed, keep placeholder */ });
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function drawRealWaveform(buf){
+    const data = buf.getChannelData(0);
+    const n = 120;
+    const blockSize = Math.floor(data.length/n);
+    const bars = waveform.querySelectorAll('.wave-bar');
+    let peak = 0;
+    const sums = [];
+    for(let i=0;i<n;i++){
+      let sum=0;
+      const start = i*blockSize;
+      for(let j=0;j<blockSize;j++){
+        const v = data[start+j] || 0;
+        sum += Math.abs(v);
+      }
+      const avg = sum/blockSize;
+      sums.push(avg);
+      if(avg>peak) peak=avg;
+    }
+    sums.forEach((avg,i)=>{
+      const h = peak>0 ? Math.max(8,(avg/peak)*90) : 20;
+      if(bars[i]) bars[i].style.height = h+'%';
+    });
+  }
+
+  // ---- timeline: drag selection + clip split/select ----
+  function xToTime(clientX){
+    const rect = timeline.getBoundingClientRect();
+    const pct = Math.min(1, Math.max(0, (clientX-rect.left)/rect.width));
+    return pct*duration;
+  }
+  function timeToPct(t){ return duration ? (t/duration)*100 : 0; }
+
+  // クリップ境界（boundaries）から、現在のクリップ一覧を {start,end} で生成
+  function getClipRanges(){
+    const points = [0, ...boundaries, duration];
+    const ranges = [];
+    for(let i=0;i<points.length-1;i++){
+      ranges.push({start:points[i], end:points[i+1]});
+    }
+    return ranges;
+  }
+
+  // 指定した時間がどの削除区間にも含まれているか
+  function isInCuts(t){
+    return cuts.some(c => t >= c.start-0.001 && t <= c.end+0.001);
+  }
+
+  timeline.addEventListener('mousedown', e=>{
+    if(e.target.closest('.handle')) return;
+    if(e.target.closest('.clip')) return; // クリップ自体のクリックはclickイベントで処理
+    const t = xToTime(e.clientX);
+    dragState = {startTime:t, current:t};
+    selectionDraft.style.display='block';
+    updateSelectionDraft();
+    video.currentTime = t;
+  });
+  window.addEventListener('mousemove', e=>{
+    if(!dragState) return;
+    dragState.current = xToTime(e.clientX);
+    updateSelectionDraft();
+  });
+  window.addEventListener('mouseup', e=>{
+    if(!dragState) return;
+    const a = Math.min(dragState.startTime, dragState.current);
+    const b = Math.max(dragState.startTime, dragState.current);
+    if(b-a > 0.15){
+      markCutBtn.disabled = false;
+      markCutBtn.dataset.start = a;
+      markCutBtn.dataset.end = b;
+    } else {
+      selectionDraft.style.display='none';
+      markCutBtn.disabled = true;
+      dragState = null;
+    }
+  });
+
+  function updateSelectionDraft(){
+    const a = Math.min(dragState.startTime, dragState.current);
+    const b = Math.max(dragState.startTime, dragState.current);
+    selectionDraft.style.left = timeToPct(a)+'%';
+    selectionDraft.style.width = (timeToPct(b)-timeToPct(a))+'%';
+  }
+
+  markCutBtn.addEventListener('click', ()=>{
+    const a = parseFloat(markCutBtn.dataset.start);
+    const b = parseFloat(markCutBtn.dataset.end);
+    addCut(a,b);
+    selectionDraft.style.display='none';
+    markCutBtn.disabled = true;
+    dragState = null;
+  });
+
+  // ---- 分割：現在の再生位置でクリップを2つに割る ----
+  splitBtn.addEventListener('click', ()=>{
+    const t = video.currentTime;
+    if(t <= 0.05 || t >= duration-0.05){
+      showToast('動画の先頭・終端付近では分割できません');
+      return;
+    }
+    if(boundaries.some(b => Math.abs(b-t) < 0.05)){
+      showToast('すでにこの位置に分割点があります');
+      return;
+    }
+    boundaries.push(t);
+    boundaries.sort((a,b)=>a-b);
+    selectedClipIndex = null;
+    deleteClipBtn.disabled = true;
+    renderClips();
+    showToast(fmt(t)+' で分割しました。不要な方のクリップをクリックして選んでください');
+  });
+
+  // ---- クリップ選択 ----
+  function selectClip(idx){
+    selectedClipIndex = idx;
+    deleteClipBtn.disabled = false;
+    renderClips();
+  }
+
+  deleteClipBtn.addEventListener('click', ()=>{
+    if(selectedClipIndex===null) return;
+    const ranges = getClipRanges();
+    const r = ranges[selectedClipIndex];
+    if(!r) return;
+    addCut(r.start, r.end);
+    selectedClipIndex = null;
+    deleteClipBtn.disabled = true;
+    renderClips();
+  });
+
+  clearAllBtn.addEventListener('click', ()=>{
+    if(cuts.length===0 && boundaries.length===0) return;
+    if(confirm('すべての削除区間・分割をリセットしますか？')){
+      cuts = [];
+      boundaries = [];
+      selectedClipIndex = null;
+      deleteClipBtn.disabled = true;
+      renderClips();
+      renderCuts();
+      updateSummary();
+    }
+  });
+
+  function addCut(start,end){
+    // merge overlapping
+    cuts.push({start,end});
+    cuts.sort((a,b)=>a.start-b.start);
+    const merged = [];
+    for(const c of cuts){
+      if(merged.length && c.start <= merged[merged.length-1].end + 0.05){
+        merged[merged.length-1].end = Math.max(merged[merged.length-1].end, c.end);
+      } else {
+        merged.push({...c});
+      }
+    }
+    cuts = merged;
+    renderCuts();
+    updateSummary();
+  }
+
+  function removeCut(idx){
+    cuts.splice(idx,1);
+    renderCuts();
+    updateSummary();
+  }
+
+  // ---- クリップ（分割線・選択可能な区間）の描画 ----
+  function renderClips(){
+    timeline.querySelectorAll('.clip').forEach(el=>el.remove());
+    timeline.querySelectorAll('.clip-boundary').forEach(el=>el.remove());
+
+    const ranges = getClipRanges();
+    ranges.forEach((r,idx)=>{
+      const clip = document.createElement('div');
+      clip.className = 'clip';
+      if(idx===selectedClipIndex) clip.classList.add('selected');
+      if(isInCuts((r.start+r.end)/2)) clip.classList.add('cut-applied');
+      clip.style.left = timeToPct(r.start)+'%';
+      clip.style.width = (timeToPct(r.end)-timeToPct(r.start))+'%';
+      clip.title = fmt(r.start)+' → '+fmt(r.end);
+
+      // クリップ上でもドラッグ選択・再生位置移動は常に有効にする。
+      // クリックした位置（ドラッグせずマウスを離した場合）だけクリップ選択として扱う。
+      let downX = null, downTime = null;
+      clip.addEventListener('mousedown', (e)=>{
+        downX = e.clientX;
+        downTime = xToTime(e.clientX);
+        dragState = {startTime: downTime, current: downTime};
+        selectionDraft.style.display='block';
+        updateSelectionDraft();
+        video.currentTime = downTime;
+      });
+      clip.addEventListener('click', (e)=>{
+        // 分割されていない（クリップが1つだけ）うちは「選択」に意味がないのでスキップ
+        if(ranges.length > 1){
+          selectClip(idx);
+        }
+      });
+      timeline.insertBefore(clip, waveform.nextSibling);
+    });
+
+    // 境界線（端の0とdurationは表示しない）
+    boundaries.forEach(b=>{
+      const line = document.createElement('div');
+      line.className = 'clip-boundary';
+      line.style.left = timeToPct(b)+'%';
+      timeline.insertBefore(line, selectionDraft);
+    });
+  }
+
+  function renderCuts(){
+    // clear regions from timeline (keep waveform/playhead/draft)
+    timeline.querySelectorAll('.region').forEach(el=>el.remove());
+    cuts.forEach(c=>{
+      const region = document.createElement('div');
+      region.className='region';
+      region.style.left = timeToPct(c.start)+'%';
+      region.style.width = (timeToPct(c.end)-timeToPct(c.start))+'%';
+      timeline.insertBefore(region, selectionDraft);
+    });
+    renderClips();
+
+    if(cuts.length===0){
+      cutlistEl.innerHTML = '<div class="empty-note">まだ削除区間がありません。タイムラインをドラッグして選択するか、分割してクリップを選んでください。</div>';
+      return;
+    }
+    cutlistEl.innerHTML = '';
+    cuts.forEach((c,idx)=>{
+      const row = document.createElement('div');
+      row.className='cutlist-row';
+      row.innerHTML = `
+        <span class="tag">削除</span>
+        <span class="range">${fmt(c.start)} → ${fmt(c.end)}</span>
+        <span class="dur">${(c.end-c.start).toFixed(1)}秒</span>
+        <button class="remove" aria-label="削除区間を取り消す">✕</button>
+      `;
+      row.querySelector('.remove').addEventListener('click', ()=>removeCut(idx));
+      cutlistEl.appendChild(row);
+    });
+  }
+
+  function updateSummary(){
+    const cutTotal = cuts.reduce((s,c)=>s+(c.end-c.start),0);
+    cutTotalEl.textContent = fmt(cutTotal);
+    finalDurEl.textContent = fmt(Math.max(0,duration-cutTotal));
+  }
+
+  // ---- silence detection ----
+  thresholdSlider.addEventListener('input', ()=>{thresholdReadout.textContent = thresholdSlider.value;});
+  minLenSlider.addEventListener('input', ()=>{minLenReadout.textContent = (minLenSlider.value/10).toFixed(1)+'秒';});
+
+  analyzeBtn.addEventListener('click', ()=>{
+    if(!audioBuffer){
+      silenceStatus.textContent = '音声データを解析できませんでした（このファイル形式は未対応かもしれません）';
+      return;
+    }
+    silenceStatus.textContent = '解析中…';
+    setTimeout(runSilenceDetection, 50);
+  });
+
+  function runSilenceDetection(){
+    const data = audioBuffer.getChannelData(0);
+    const sr = audioBuffer.sampleRate;
+    const thresholdPct = parseInt(thresholdSlider.value,10); // 1-10
+    const minLen = parseInt(minLenSlider.value,10)/10; // seconds
+
+    // compute rms over small windows
+    const windowSize = Math.floor(sr*0.05); // 50ms windows
+    const windows = [];
+    let maxRms = 0;
+    for(let i=0;i<data.length;i+=windowSize){
+      let sum=0, count=0;
+      for(let j=i;j<Math.min(i+windowSize,data.length);j++){
+        sum += data[j]*data[j];
+        count++;
+      }
+      const rms = Math.sqrt(sum/count);
+      windows.push(rms);
+      if(rms>maxRms) maxRms=rms;
+    }
+    const threshold = maxRms * (thresholdPct/100) * 1.2;
+
+    const candidates = [];
+    let runStart = null;
+    for(let i=0;i<windows.length;i++){
+      const t = (i*windowSize)/sr;
+      if(windows[i] < threshold){
+        if(runStart===null) runStart = t;
+      } else {
+        if(runStart!==null){
+          const runEnd = t;
+          if(runEnd-runStart >= minLen){
+            candidates.push({start:runStart, end:runEnd});
+          }
+          runStart = null;
+        }
+      }
+    }
+    if(runStart!==null){
+      const runEnd = duration;
+      if(runEnd-runStart >= minLen) candidates.push({start:runStart, end:runEnd});
+    }
+
+    silenceCandidates = candidates;
+    renderCandidates();
+    silenceStatus.textContent = candidates.length
+      ? candidates.length+'件の無音候補が見つかりました'
+      : '無音候補は見つかりませんでした（しきい値を上げてみてください）';
+  }
+
+  function renderCandidates(){
+    candidateList.innerHTML = '';
+    timeline.querySelectorAll('.region.silence-suggest').forEach(el=>el.remove());
+
+    silenceCandidates.forEach((c,idx)=>{
+      const row = document.createElement('div');
+      row.className='candidate-row';
+      row.innerHTML = `
+        <span class="dur">${(c.end-c.start).toFixed(1)}秒</span>
+        <span class="range">${fmt(c.start)} → ${fmt(c.end)}</span>
+        <button class="accept">採用</button>
+        <button class="skip">スキップ</button>
+      `;
+      row.querySelector('.accept').addEventListener('click', ()=>{
+        addCut(c.start, c.end);
+        row.remove();
+        marker.remove();
+      });
+      row.querySelector('.skip').addEventListener('click', ()=>{
+        row.remove();
+        marker.remove();
+      });
+      candidateList.appendChild(row);
+
+      const marker = document.createElement('div');
+      marker.className='region silence-suggest';
+      marker.style.left = timeToPct(c.start)+'%';
+      marker.style.width = (timeToPct(c.end)-timeToPct(c.start))+'%';
+      timeline.insertBefore(marker, selectionDraft);
+    });
+  }
+
+  // ---- スキップ再生プレビュー（従来の簡易確認） ----
+  previewSkipBtn.addEventListener('click', ()=>{
+    if(cuts.length===0){
+      showToast('削除区間がありません。そのまま全体を再生します。');
+    } else {
+      showToast('残す区間だけをスキップ再生でプレビューします');
+    }
+    video.currentTime = 0;
+    video.play();
+  });
+
+  // ---- 実際の書き出し（FFmpeg.wasm） ----
+  let ffmpeg = null;
+  let ffmpegLoading = null;
+
+  const exportProgress = document.getElementById('exportProgress');
+  const progressFill = document.getElementById('progressFill');
+  const progressLabel = document.getElementById('progressLabel');
+  const exportResult = document.getElementById('exportResult');
+
+  function getExportMode(){
+    const r = document.querySelector('input[name="exportMode"]:checked');
+    return r ? r.value : 'fast';
+  }
+
+  function setProgress(pct, label){
+    exportProgress.style.display = 'block';
+    progressFill.style.width = Math.min(100,Math.max(0,pct))+'%';
+    progressLabel.textContent = label;
+  }
+
+  async function ensureFFmpegLoaded(){
+    if(ffmpeg) return ffmpeg;
+    if(ffmpegLoading) return ffmpegLoading;
+
+    ffmpegLoading = (async ()=>{
+      setProgress(3, 'FFmpegライブラリを読み込み中…（初回のみ・数十MBあります）');
+
+      // @ffmpeg/ffmpeg (UMD) は、classWorkerURL指定時に Worker を
+      // {type:"module"} で生成するが、その中身(814.ffmpeg.js)は
+      // importScripts を使うクラシックスクリプトのため、
+      // モジュールWorkerだと "Module scripts don't support importScripts()"
+      // で失敗する。{type:"module"} 指定をクラシックWorkerに書き換えてから読み込む。
+      await loadPatchedFFmpegScript('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js');
+      await loadScriptOnce('https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js');
+
+      const { FFmpeg } = window.FFmpegWASM;
+      const { toBlobURL } = window.FFmpegUtil;
+
+      const instance = new FFmpeg();
+      instance.on('progress', ({progress})=>{
+        // 0-1 の値。書き出し全体の40%〜95%の範囲にマッピングして表示
+        const pct = 40 + Math.min(1, Math.max(0, progress)) * 55;
+        setProgress(pct, '書き出し中… '+Math.round(progress*100)+'%');
+      });
+      instance.on('log', ({message})=>{
+        console.log('[ffmpeg]', message);
+      });
+
+      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+      const ffmpegBaseURL = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd';
+      setProgress(15, 'FFmpegコアを読み込み中…');
+      await instance.load({
+        coreURL: await toBlobURL(baseURL+'/ffmpeg-core.js', 'text/javascript'),
+        wasmURL: await toBlobURL(baseURL+'/ffmpeg-core.wasm', 'application/wasm'),
+        classWorkerURL: await toBlobURL(ffmpegBaseURL+'/814.ffmpeg.js', 'text/javascript'),
+      });
+      ffmpeg = instance;
+      return instance;
+    })();
+
+    try{
+      return await ffmpegLoading;
+    } catch(err){
+      ffmpegLoading = null;
+      throw err;
+    }
+  }
+
+  let ffmpegScriptLoaded = false;
+  async function loadPatchedFFmpegScript(src){
+    if(ffmpegScriptLoaded) return;
+    const resp = await fetch(src);
+    if(!resp.ok) throw new Error('FFmpegライブラリの取得に失敗しました: '+resp.status);
+    let text = await resp.text();
+    // new Worker(new URL(s,"file:///..."),{type:"module"}) → new Worker(s)
+    // （クラシックWorkerとして起動し、importScriptsが使えるようにする）
+    text = text.replace(
+      /new Worker\(new URL\(s,"file:\/\/\/[^"]*"\),\{type:"module"\}\)/,
+      'new Worker(s)'
+    );
+    const blob = new Blob([text], {type:'text/javascript'});
+    const blobUrl = URL.createObjectURL(blob);
+    await new Promise((resolve,reject)=>{
+      const s = document.createElement('script');
+      s.src = blobUrl;
+      s.onload = ()=>{ ffmpegScriptLoaded = true; resolve(); };
+      s.onerror = ()=>reject(new Error('FFmpegライブラリの読み込みに失敗しました'));
+      document.head.appendChild(s);
+    });
+  }
+
+  function loadScriptOnce(src){
+    return new Promise((resolve,reject)=>{
+      if(document.querySelector('script[data-src="'+src+'"]')){
+        resolve(); return;
+      }
+      const s = document.createElement('script');
+      s.src = src;
+      s.dataset.src = src;
+      s.onload = ()=>resolve();
+      s.onerror = ()=>reject(new Error('スクリプト読み込み失敗: '+src));
+      document.head.appendChild(s);
+    });
+  }
+
+  // 削除区間(cuts)の逆から「残す区間」を計算
+  function getKeepRanges(){
+    const sorted = [...cuts].sort((a,b)=>a.start-b.start);
+    const keep = [];
+    let cursor = 0;
+    for(const c of sorted){
+      if(c.start > cursor + 0.02){
+        keep.push({start:cursor, end:c.start});
+      }
+      cursor = Math.max(cursor, c.end);
+    }
+    if(cursor < duration - 0.02){
+      keep.push({start:cursor, end:duration});
+    }
+    return keep.filter(r => r.end - r.start > 0.05);
+  }
+
+  exportBtn.addEventListener('click', async ()=>{
+    if(!currentFile){
+      showToast('動画ファイルが見つかりません。再読み込みしてください。');
+      return;
+    }
+    const keepRanges = getKeepRanges();
+    if(keepRanges.length===0){
+      showToast('残す区間がありません。削除区間を見直してください。');
+      return;
+    }
+
+    exportBtn.disabled = true;
+    exportResult.style.display = 'none';
+    const mode = getExportMode();
+
+    try{
+      setProgress(0, '準備中…');
+      const ff = await ensureFFmpegLoaded();
+
+      setProgress(38, '動画ファイルを読み込み中…');
+      const inputName = 'input'+getExt(currentFile.name);
+      const fileData = await currentFile.arrayBuffer();
+      await ff.writeFile(inputName, new Uint8Array(fileData));
+
+      // 各keep区間を個別に切り出し、その後結合する
+      // 高速モード：-ssを-iの前に置く（入力シーク＝直近のキーフレームから開始、再エンコードなしで高速）
+      // 正確モード：-ssを-iの後に置く（出力シーク＝指定位置から正確だが遅い）＋再エンコード
+      const segmentNames = [];
+      for(let i=0;i<keepRanges.length;i++){
+        const r = keepRanges[i];
+        const segName = 'seg'+i+'.mp4';
+        const dur = (r.end - r.start).toFixed(3);
+        let args;
+        if(mode==='fast'){
+          args = ['-ss', r.start.toFixed(3), '-i', inputName, '-t', dur, '-c', 'copy', '-avoid_negative_ts', 'make_zero', segName];
+        } else {
+          args = ['-i', inputName, '-ss', r.start.toFixed(3), '-t', dur, '-c:v','libx264','-preset','fast','-c:a','aac', segName];
+        }
+        setProgress(38 + (i/keepRanges.length)*2, '区間 '+(i+1)+'/'+keepRanges.length+' を切り出し中…');
+        await ff.exec(args);
+        segmentNames.push(segName);
+      }
+
+      let outputData;
+      let outputName = 'output.mp4';
+      if(segmentNames.length===1){
+        outputData = await ff.readFile(segmentNames[0]);
+      } else {
+        // concat用のリストファイルを作成して結合
+        const listContent = segmentNames.map(n=>"file '"+n+"'").join('\n');
+        await ff.writeFile('list.txt', listContent);
+        setProgress(92, 'クリップを結合中…');
+        const concatArgs = ['-f','concat','-safe','0','-i','list.txt'];
+        if(mode==='fast'){
+          concatArgs.push('-c','copy');
+        } else {
+          concatArgs.push('-c:v','libx264','-preset','fast','-c:a','aac');
+        }
+        concatArgs.push(outputName);
+        await ff.exec(concatArgs);
+        outputData = await ff.readFile(outputName);
+      }
+
+      setProgress(100, '完了');
+      const blob = new Blob([outputData.buffer], {type:'video/mp4'});
+      const url = URL.createObjectURL(blob);
+      const sizeMB = (blob.size/1024/1024).toFixed(1);
+
+      exportResult.style.display = 'flex';
+      exportResult.innerHTML =
+        '<span class="info">書き出し完了（'+sizeMB+'MB・'+fmt(keepRanges.reduce((s,r)=>s+(r.end-r.start),0))+'）</span>'+
+        '<a class="download-link" href="'+url+'" download="quicktrim_output.mp4">ダウンロード</a>';
+
+      showToast('書き出しが完了しました');
+    } catch(err){
+      console.error(err);
+      setProgress(0,'');
+      exportProgress.style.display = 'none';
+      showToast('書き出し中にエラーが発生しました：'+(err.message||err));
+    } finally {
+      exportBtn.disabled = false;
+    }
+  });
+
+  function getExt(filename){
+    const m = filename.match(/\.[^.]+$/);
+    return m ? m[0] : '.mp4';
+  }
+
+})();
+</script>
+
+</body>
+</html>
