@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Quick Trim</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f232c;
+    --border: #2a2f3a;
+    --text: #e7ebf0;
+    --muted: #9aa4b2;
+    --accent: #4f9dff;
+    --accent-2: #2b6fd6;
+    --danger: #ff5d5d;
+    --danger-2: #c83a3a;
+    --ok: #46d18a;
+    --warn: #f6b955;
+    --silence: rgba(246, 185, 85, 0.30);
+    --silence-cur: rgba(246, 185, 85, 0.85);
+    --removed: rgba(255, 93, 93, 0.40);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif;
+    font-size: 14px;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: 0.5px; }
+  header .tag { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  main { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px 40px; max-width: 1180px; margin: 0 auto; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px;
+  }
+  .grow { flex: 1; min-width: 320px; }
+
+  button {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; font-size: 13px; cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+  }
+  button:hover:not(:disabled) { background: #262b36; border-color: #3a4150; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary { background: var(--accent-2); border-color: var(--accent); }
+  button.primary:hover:not(:disabled) { background: var(--accent); }
+  button.danger { background: var(--danger-2); border-color: var(--danger); }
+  button.danger:hover:not(:disabled) { background: var(--danger); }
+  button.ok { background: #1f7a4d; border-color: var(--ok); }
+  button.ok:hover:not(:disabled) { background: #259c61; }
+
+  label.file {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent-2); border: 1px solid var(--accent);
+    padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  }
+  label.file:hover { background: var(--accent); }
+  input[type=file] { display: none; }
+
+  video { width: 100%; max-height: 420px; background: #000; border-radius: 8px; display: block; }
+
+  .transport { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+
+  /* Timeline */
+  .timeline-wrap { margin-top: 6px; }
+  #timeline { width: 100%; height: 92px; display: block; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+  .legend { display: flex; gap: 16px; margin-top: 8px; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 14px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid rgba(255,255,255,0.15); }
+
+  .controls-grid { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  .field input[type=number] { width: 64px; background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 5px 6px; font-size: 13px; }
+
+  h2 { font-size: 14px; margin: 0 0 10px; color: var(--text); }
+  .hint { color: var(--muted); font-size: 12px; }
+
+  /* Review panel */
+  #reviewPanel .review-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+  #reviewCounter { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #reviewMeta { color: var(--muted); font-size: 12px; }
+  .cand-info { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 10px; font-variant-numeric: tabular-nums; }
+  .cand-info .big { font-size: 15px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+  .badge.pending { background: #394150; color: #cfd6df; }
+  .badge.adopted { background: #1f7a4d; color: #d6ffe8; }
+  .badge.skipped { background: #5a4a1f; color: #ffeec2; }
+  .review-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .stat { color: var(--muted); font-size: 12px; }
+  .stat b { color: var(--text); }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  #status { color: var(--muted); font-size: 12px; min-height: 16px; }
+  kbd { background: var(--panel-2); border: 1px solid var(--border); border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 6px; font-size: 11px; }
+  .seglist { max-height: 150px; overflow:auto; font-variant-numeric: tabular-nums; font-size:12px; }
+  .seglist div { padding:2px 0; color: var(--muted); }
+  .seglist div.removed { color: var(--danger); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Quick Trim</h1>
+  <span class="tag">無音検出つき 動画トリマー</span>
+  <span class="spacer"></span>
+  <label class="file">動画を開く<input id="fileInput" type="file" accept="video/*" /></label>
+</header>
+
+<main>
+  <div id="status">動画ファイルを開いてください（ http://localhost:8765/quicktrim.html ）。</div>
+
+  <div class="row">
+    <!-- Preview + transport -->
+    <div class="panel grow" style="min-width: 460px;">
+      <video id="video" playsinline></video>
+      <div class="transport">
+        <button id="playBtn" disabled>▶ 再生</button>
+        <button id="stopBtn" disabled>⏹ 停止</button>
+        <span class="time"><span id="curTime">0:00.000</span> / <span id="durTime">0:00.000</span></span>
+        <span class="spacer" style="flex:1"></span>
+        <label class="field"><input type="checkbox" id="skipRemoved" checked /> 削除区間をスキップ再生</label>
+      </div>
+    </div>
+
+    <!-- Silence review -->
+    <div class="panel grow" id="reviewPanel" style="min-width: 360px;">
+      <h2>無音候補レビュー</h2>
+      <div id="reviewEmpty" class="empty">まだ無音検出を実行していません。下の「無音検出」を押してください。</div>
+      <div id="reviewBody" style="display:none;">
+        <div class="review-head">
+          <div id="reviewCounter">無音候補 0/0</div>
+          <div id="reviewMeta"></div>
+        </div>
+        <div class="cand-info" id="candInfo"></div>
+        <div class="review-actions">
+          <button id="prevBtn">◀ 前へ</button>
+          <button id="nextBtn">次へ ▶</button>
+          <button id="playCandBtn">▶ 再生</button>
+          <button id="adoptBtn" class="ok">採用して削除</button>
+          <button id="skipBtn">スキップ</button>
+        </div>
+        <div style="margin-top:10px;" class="stat">
+          採用: <b id="cntAdopted">0</b> ・ スキップ: <b id="cntSkipped">0</b> ・ 未処理: <b id="cntPending">0</b>
+        </div>
+        <div style="margin-top:6px;" class="hint">候補を選ぶと再生ヘッドが区間の少し前へ移動し、タイムライン上で強調表示されます。採用した候補だけが削除対象になります。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="panel">
+    <h2>タイムライン</h2>
+    <div class="timeline-wrap">
+      <canvas id="timeline" width="1140" height="92"></canvas>
+    </div>
+    <div class="legend">
+      <span><i class="swatch" style="background:#3a4150"></i> 通常区間</span>
+      <span><i class="swatch" style="background:var(--removed)"></i> 削除区間</span>
+      <span><i class="swatch" style="background:var(--silence)"></i> 無音候補</span>
+      <span><i class="swatch" style="background:var(--silence-cur)"></i> 選択中の候補</span>
+      <span><i class="swatch" style="background:var(--accent)"></i> 再生ヘッド / 分割点</span>
+    </div>
+  </div>
+
+  <!-- Editing tools -->
+  <div class="row">
+    <div class="panel grow">
+      <h2>カット・分割・書き出し</h2>
+      <div class="controls-grid">
+        <button id="splitBtn" disabled>✂ 再生ヘッドで分割</button>
+        <button id="toggleSegBtn" disabled>選択区間を 削除/復元</button>
+        <button id="clearEditsBtn" disabled>編集をリセット</button>
+        <span class="spacer" style="flex:1"></span>
+        <button id="exportEdlBtn" class="primary" disabled>EDL(JSON)を書き出し</button>
+        <button id="exportVidBtn" class="primary" disabled>動画を書き出し(webm)</button>
+      </div>
+      <div class="hint" style="margin-top:8px;">タイムラインの区間をクリックして選択 → 「削除/復元」。書き出しは「削除区間」を除いた部分をつなげて出力します。</div>
+      <div id="exportProgress" class="hint" style="margin-top:6px;"></div>
+    </div>
+
+    <div class="panel grow">
+      <h2>無音検出</h2>
+      <div class="controls-grid">
+        <span class="field">しきい値(dB) <input type="number" id="thrInput" value="-40" step="1" /></span>
+        <span class="field">最短無音(秒) <input type="number" id="minSilInput" value="0.4" step="0.1" min="0.05" /></span>
+        <span class="field">前余白(秒) <input type="number" id="leadInput" value="0.5" step="0.1" min="0" /></span>
+        <button id="detectBtn" class="primary" disabled>無音検出</button>
+      </div>
+      <div class="hint" style="margin-top:8px;">音声を解析して無音区間を候補として抽出します（自動削除はしません）。</div>
+      <div class="seglist" id="segList" style="margin-top:10px;"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+// ---------- State ----------
+const state = {
+  duration: 0,
+  cutPoints: [],          // sorted unique split times (interior only)
+  removed: [],            // sorted disjoint [start,end] intervals marked for deletion
+  candidates: [],         // {id,start,end,status:'pending'|'adopted'|'skipped'}
+  currentIndex: -1,       // index into candidates of selected candidate
+  selectedSegStart: null, // start time of selected segment
+  audioBuffer: null,
+  hasVideo: false,
+};
+
+// ---------- DOM ----------
+const $ = (id) => document.getElementById(id);
+const video = $("video");
+const canvas = $("timeline");
+const ctx = canvas.getContext("2d");
+
+// ---------- Utils ----------
+function fmt(t) {
+  if (!isFinite(t) || t < 0) t = 0;
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  const ms = Math.floor((t - Math.floor(t)) * 1000);
+  return `${m}:${String(s).padStart(2, "0")}.${String(ms).padStart(3, "0")}`;
+}
+function setStatus(msg) { $("status").textContent = msg; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// ---------- Interval ops on state.removed ----------
+function addRemoved(s, e) {
+  if (e <= s) return;
+  const list = state.removed.concat([[s, e]]).sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const iv of list) {
+    if (merged.length && iv[0] <= merged[merged.length - 1][1] + 1e-6) {
+      merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1]);
+    } else {
+      merged.push([iv[0], iv[1]]);
+    }
+  }
+  state.removed = merged;
+}
+function subtractRemoved(s, e) {
+  const out = [];
+  for (const [a, b] of state.removed) {
+    if (b <= s || a >= e) { out.push([a, b]); continue; }
+    if (a < s) out.push([a, s]);
+    if (b > e) out.push([e, b]);
+  }
+  state.removed = out;
+}
+function isRangeRemoved(s, e) {
+  for (const [a, b] of state.removed) {
+    if (a <= s + 1e-6 && b >= e - 1e-6) return true;
+  }
+  return false;
+}
+function timeRemoved(t) {
+  for (const [a, b] of state.removed) if (t >= a - 1e-6 && t < b - 1e-6) return [a, b];
+  return null;
+}
+function keptIntervals() {
+  const kept = [];
+  let cursor = 0;
+  for (const [a, b] of state.removed) {
+    if (a > cursor + 1e-4) kept.push([cursor, a]);
+    cursor = Math.max(cursor, b);
+  }
+  if (cursor < state.duration - 1e-4) kept.push([cursor, state.duration]);
+  return kept;
+}
+
+// ---------- Segments (from cut points) ----------
+function segments() {
+  const pts = [0, ...state.cutPoints.filter(p => p > 0 && p < state.duration), state.duration]
+    .sort((a, b) => a - b);
+  const segs = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (pts[i + 1] - pts[i] > 1e-4) segs.push({ start: pts[i], end: pts[i + 1] });
+  }
+  return segs;
+}
+function addCut(t) {
+  t = clamp(t, 0, state.duration);
+  if (t <= 1e-4 || t >= state.duration - 1e-4) return;
+  if (!state.cutPoints.some(p => Math.abs(p - t) < 1e-3)) {
+    state.cutPoints.push(t);
+    state.cutPoints.sort((a, b) => a - b);
+  }
+}
+
+// ---------- Time mapping for canvas ----------
+function xForTime(t) { return (t / state.duration) * canvas.width; }
+function timeForX(x) { return (x / canvas.width) * state.duration; }
+
+// ---------- Rendering ----------
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#1f232c";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!state.duration) { return; }
+
+  const topPad = 18, h = canvas.height - topPad - 8, y0 = topPad;
+
+  // segments
+  for (const seg of segments()) {
+    const x = xForTime(seg.start), w = xForTime(seg.end) - x;
+    const removed = isRangeRemoved(seg.start, seg.end);
+    ctx.fillStyle = removed ? "rgba(255,93,93,0.30)" : "#3a4150";
+    ctx.fillRect(x, y0, Math.max(1, w), h);
+    if (state.selectedSegStart !== null && Math.abs(seg.start - state.selectedSegStart) < 1e-3) {
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, y0 + 1, Math.max(1, w) - 2, h - 2);
+    }
+  }
+  // removed overlay (hatch)
+  for (const [a, b] of state.removed) {
+    const x = xForTime(a), w = xForTime(b) - x;
+    ctx.fillStyle = "rgba(255,93,93,0.40)";
+    ctx.fillRect(x, y0, Math.max(1, w), h);
+  }
+
+  // silence candidates
+  state.candidates.forEach((c, i) => {
+    const x = xForTime(c.start), w = Math.max(2, xForTime(c.end) - x);
+    if (i === state.currentIndex) {
+      ctx.fillStyle = "rgba(246,185,85,0.85)";
+      ctx.fillRect(x, y0, w, h);
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+      ctx.strokeRect(x, y0, w, h);
+    } else {
+      ctx.fillStyle = c.status === "adopted" ? "rgba(70,209,138,0.30)" : "rgba(246,185,85,0.30)";
+      ctx.fillRect(x, y0 + h - 14, w, 14);
+    }
+  });
+
+  // cut point lines
+  ctx.strokeStyle = "rgba(79,157,255,0.6)"; ctx.lineWidth = 1;
+  for (const p of state.cutPoints) {
+    const x = xForTime(p);
+    ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + h); ctx.stroke();
+  }
+
+  // ruler ticks
+  ctx.fillStyle = "#9aa4b2"; ctx.font = "10px sans-serif";
+  const step = niceStep(state.duration);
+  for (let t = 0; t <= state.duration + 1e-6; t += step) {
+    const x = xForTime(t);
+    ctx.fillRect(x, 0, 1, 6);
+    ctx.fillText(fmt(t).replace(/\.\d+$/, ""), Math.min(x + 2, canvas.width - 30), 13);
+  }
+
+  // playhead
+  const px = xForTime(video.currentTime || 0);
+  ctx.strokeStyle = "#4f9dff"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, canvas.height); ctx.stroke();
+  ctx.fillStyle = "#4f9dff";
+  ctx.beginPath(); ctx.moveTo(px - 5, 0); ctx.lineTo(px + 5, 0); ctx.lineTo(px, 7); ctx.closePath(); ctx.fill();
+}
+function niceStep(dur) {
+  const targets = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+  for (const t of targets) if (dur / t <= 12) return t;
+  return 600;
+}
+
+// ---------- Playback ----------
+let playMode = "normal"; // 'normal' | 'candidate'
+let candStopAt = null;
+
+function tick() {
+  $("curTime").textContent = fmt(video.currentTime);
+  // skip removed regions during normal playback
+  if (playMode === "normal" && $("skipRemoved").checked && !video.paused) {
+    const r = timeRemoved(video.currentTime);
+    if (r) {
+      if (r[1] < state.duration - 0.05) video.currentTime = r[1] + 0.001;
+      else { video.pause(); }
+    }
+  }
+  if (playMode === "candidate" && candStopAt !== null && video.currentTime >= candStopAt) {
+    video.pause(); playMode = "normal"; candStopAt = null;
+  }
+  draw();
+  requestAnimationFrame(tick);
+}
+
+// ---------- Silence detection ----------
+async function detectSilence() {
+  if (!state.audioBuffer) { setStatus("音声を解析できませんでした。"); return; }
+  const thrDb = parseFloat($("thrInput").value);
+  const minSil = Math.max(0.05, parseFloat($("minSilInput").value));
+  const buf = state.audioBuffer;
+  const ch = buf.numberOfChannels;
+  const sr = buf.sampleRate;
+  const data = [];
+  for (let c = 0; c < ch; c++) data.push(buf.getChannelData(c));
+  const win = Math.max(1, Math.floor(sr * 0.02)); // 20ms windows
+  const thrLin = Math.pow(10, thrDb / 20);
+  const frames = Math.floor(buf.length / win);
+  const silentFlags = new Uint8Array(frames);
+  for (let f = 0; f < frames; f++) {
+    let sumSq = 0;
+    const base = f * win;
+    for (let i = 0; i < win; i++) {
+      let s = 0;
+      for (let c = 0; c < ch; c++) s += data[c][base + i];
+      s /= ch;
+      sumSq += s * s;
+    }
+    const rms = Math.sqrt(sumSq / win);
+    silentFlags[f] = rms < thrLin ? 1 : 0;
+  }
+  // group consecutive silent frames
+  const cands = [];
+  let runStart = -1;
+  for (let f = 0; f <= frames; f++) {
+    const silent = f < frames && silentFlags[f] === 1;
+    if (silent && runStart < 0) runStart = f;
+    if (!silent && runStart >= 0) {
+      const start = (runStart * win) / sr;
+      const end = (f * win) / sr;
+      if (end - start >= minSil) cands.push({ start, end });
+      runStart = -1;
+    }
+  }
+  state.candidates = cands.map((c, i) => ({ id: i + 1, start: c.start, end: c.end, status: "pending" }));
+  state.currentIndex = state.candidates.length ? 0 : -1;
+  setStatus(`無音候補を ${state.candidates.length} 件検出しました（しきい値 ${thrDb}dB / 最短 ${minSil}s）。`);
+  refreshReview();
+  if (state.currentIndex >= 0) selectCandidate(0, true);
+  draw();
+}
+
+// ---------- Review UI ----------
+function refreshReview() {
+  const n = state.candidates.length;
+  if (n === 0) {
+    $("reviewEmpty").style.display = "block";
+    $("reviewBody").style.display = "none";
+    return;
+  }
+  $("reviewEmpty").style.display = "none";
+  $("reviewBody").style.display = "block";
+  const idx = state.currentIndex;
+  $("reviewCounter").textContent = `無音候補 ${idx + 1}/${n}`;
+  const c = state.candidates[idx];
+  const dur = c.end - c.start;
+  const statusJa = { pending: "未処理", adopted: "採用(削除)", skipped: "スキップ" }[c.status];
+  $("candInfo").innerHTML =
+    `<div class="big">区間: <b>${fmt(c.start)}</b> 〜 <b>${fmt(c.end)}</b> ` +
+    `<span class="badge ${c.status}">${statusJa}</span></div>` +
+    `<div class="stat" style="margin-top:4px;">長さ: <b>${dur.toFixed(2)} 秒</b></div>`;
+  $("cntAdopted").textContent = state.candidates.filter(x => x.status === "adopted").length;
+  $("cntSkipped").textContent = state.candidates.filter(x => x.status === "skipped").length;
+  $("cntPending").textContent = state.candidates.filter(x => x.status === "pending").length;
+  $("prevBtn").disabled = idx <= 0;
+  $("nextBtn").disabled = idx >= n - 1;
+  refreshSegList();
+}
+
+function selectCandidate(idx, seek) {
+  if (idx < 0 || idx >= state.candidates.length) return;
+  state.currentIndex = idx;
+  const c = state.candidates[idx];
+  if (seek) {
+    const lead = Math.max(0, parseFloat($("leadInput").value) || 0);
+    video.currentTime = clamp(c.start - lead, 0, state.duration);
+  }
+  refreshReview();
+  draw();
+}
+
+function playCandidate() {
+  const c = state.candidates[state.currentIndex];
+  if (!c) return;
+  const lead = Math.max(0, parseFloat($("leadInput").value) || 0);
+  video.currentTime = clamp(c.start - lead, 0, state.duration);
+  candStopAt = clamp(c.end + 0.15, 0, state.duration);
+  playMode = "candidate";
+  video.play();
+}
+
+function adoptCandidate() {
+  const c = state.candidates[state.currentIndex];
+  if (!c) return;
+  addCut(c.start); addCut(c.end);
+  addRemoved(c.start, c.end);
+  c.status = "adopted";
+  setStatus(`候補 ${c.id} を採用しました（${fmt(c.start)}〜${fmt(c.end)} を削除対象に追加）。`);
+  advance();
+}
+function skipCandidate() {
+  const c = state.candidates[state.currentIndex];
+  if (!c) return;
+  // if previously adopted, undo removal when skipping
+  if (c.status === "adopted") subtractRemoved(c.start, c.end);
+  c.status = "skipped";
+  advance();
+}
+function advance() {
+  const n = state.candidates.length;
+  let next = state.currentIndex;
+  for (let k = 1; k <= n; k++) {
+    const j = (state.currentIndex + k) % n;
+    if (state.candidates[j].status === "pending") { next = j; break; }
+  }
+  selectCandidate(next, true);
+  updateEditButtons();
+}
+
+// ---------- Segment list ----------
+function refreshSegList() {
+  const kept = keptIntervals();
+  const total = kept.reduce((a, [s, e]) => a + (e - s), 0);
+  const rem = state.removed.reduce((a, [s, e]) => a + (e - s), 0);
+  let html = `<div><b style="color:var(--text)">残り ${fmt(total)}</b> ／ 削除 ${fmt(rem)}（${state.removed.length} 区間）</div>`;
+  state.removed.forEach(([s, e]) => {
+    html += `<div class="removed">削除 ${fmt(s)} 〜 ${fmt(e)} (${(e - s).toFixed(2)}s)</div>`;
+  });
+  $("segList").innerHTML = html;
+}
+
+// ---------- Edit buttons ----------
+function updateEditButtons() {
+  const ready = state.hasVideo;
+  $("splitBtn").disabled = !ready;
+  $("clearEditsBtn").disabled = !ready;
+  $("toggleSegBtn").disabled = !(ready && state.selectedSegStart !== null);
+  $("exportEdlBtn").disabled = !ready;
+  $("exportVidBtn").disabled = !ready;
+  refreshSegList();
+}
+
+// ---------- Export: EDL ----------
+function exportEdl() {
+  const edl = {
+    tool: "Quick Trim",
+    duration: state.duration,
+    cutPoints: state.cutPoints,
+    removed: state.removed.map(([s, e]) => ({ start: s, end: e })),
+    keep: keptIntervals().map(([s, e]) => ({ start: s, end: e })),
+    silenceCandidates: state.candidates,
+  };
+  const blob = new Blob([JSON.stringify(edl, null, 2)], { type: "application/json" });
+  triggerDownload(blob, "quicktrim_edl.json");
+  setStatus("EDL(JSON) を書き出しました。");
+}
+
+// ---------- Export: video via MediaRecorder ----------
+function pickMime() {
+  const opts = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+  for (const o of opts) if (window.MediaRecorder && MediaRecorder.isTypeSupported(o)) return o;
+  return "video/webm";
+}
+function seekTo(t) {
+  return new Promise((resolve) => {
+    const onSeek = () => { video.removeEventListener("seeked", onSeek); resolve(); };
+    video.addEventListener("seeked", onSeek);
+    video.currentTime = clamp(t, 0, state.duration);
+  });
+}
+function playUntil(end) {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (video.currentTime >= end - 0.01 || video.ended) {
+        video.removeEventListener("timeupdate", check);
+        resolve();
+      }
+    };
+    video.addEventListener("timeupdate", check);
+    video.play();
+  });
+}
+async function exportVideo() {
+  const kept = keptIntervals();
+  if (!kept.length) { setStatus("書き出す区間がありません。"); return; }
+  if (typeof video.captureStream !== "function") { setStatus("このブラウザは captureStream 非対応です。EDL書き出しをご利用ください。"); return; }
+  $("exportVidBtn").disabled = true;
+  playMode = "export";
+  const prog = $("exportProgress");
+  try {
+    const stream = video.captureStream();
+    const recorder = new MediaRecorder(stream, { mimeType: pickMime() });
+    const chunks = [];
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    const done = new Promise((res) => recorder.onstop = res);
+    await seekTo(kept[0][0]);
+    recorder.start(100);
+    for (let i = 0; i < kept.length; i++) {
+      const [s, e] = kept[i];
+      if (Math.abs(video.currentTime - s) > 0.05) { recorder.pause(); await seekTo(s); recorder.resume(); }
+      prog.textContent = `書き出し中… 区間 ${i + 1}/${kept.length}`;
+      await playUntil(e);
+    }
+    video.pause();
+    recorder.stop();
+    await done;
+    const blob = new Blob(chunks, { type: "video/webm" });
+    triggerDownload(blob, "quicktrim_export.webm");
+    prog.textContent = `完了：${(blob.size / 1024 / 1024).toFixed(2)} MB を書き出しました。`;
+    setStatus("動画(webm)を書き出しました。");
+  } catch (err) {
+    prog.textContent = "書き出しエラー: " + err.message;
+    setStatus("書き出しエラー: " + err.message);
+  } finally {
+    playMode = "normal";
+    $("exportVidBtn").disabled = false;
+  }
+}
+function triggerDownload(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.style.display = "none";
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+}
+
+// ---------- Load video ----------
+async function loadFile(file) {
+  if (!file) return;
+  setStatus(`読み込み中: ${file.name} …`);
+  const url = URL.createObjectURL(file);
+  video.src = url;
+  // reset edit state
+  state.cutPoints = []; state.removed = []; state.candidates = [];
+  state.currentIndex = -1; state.selectedSegStart = null;
+  await new Promise((res, rej) => {
+    video.onloadedmetadata = res;
+    video.onerror = () => rej(new Error("動画を読み込めませんでした"));
+  });
+  state.duration = video.duration;
+  state.hasVideo = true;
+  $("durTime").textContent = fmt(state.duration);
+  $("playBtn").disabled = false; $("stopBtn").disabled = false; $("detectBtn").disabled = false;
+  updateEditButtons();
+  refreshReview();
+  setStatus(`読み込み完了: ${file.name}（長さ ${fmt(state.duration)}）。音声を解析中…`);
+  draw();
+  // decode audio for silence detection
+  try {
+    const ab = await file.arrayBuffer();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const actx = new AC();
+    state.audioBuffer = await actx.decodeAudioData(ab);
+    setStatus(`準備完了: ${file.name}。無音検出を実行できます。`);
+  } catch (e) {
+    state.audioBuffer = null;
+    setStatus(`動画は読み込みましたが、音声の解析に失敗しました（${e.message}）。無音検出は使用できません。`);
+  }
+}
+
+// ---------- Events ----------
+$("fileInput").addEventListener("change", (e) => loadFile(e.target.files[0]));
+$("playBtn").addEventListener("click", () => {
+  playMode = "normal";
+  if (video.paused) { video.play(); $("playBtn").textContent = "⏸ 一時停止"; }
+  else { video.pause(); $("playBtn").textContent = "▶ 再生"; }
+});
+video.addEventListener("play", () => { $("playBtn").textContent = "⏸ 一時停止"; });
+video.addEventListener("pause", () => { $("playBtn").textContent = "▶ 再生"; });
+$("stopBtn").addEventListener("click", () => { video.pause(); video.currentTime = 0; playMode = "normal"; });
+
+canvas.addEventListener("click", (e) => {
+  if (!state.duration) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const t = timeForX(x);
+  // shift-click selects segment, plain click seeks
+  if (e.shiftKey) {
+    const seg = segments().find(sg => t >= sg.start && t < sg.end);
+    state.selectedSegStart = seg ? seg.start : null;
+    updateEditButtons();
+  } else {
+    video.currentTime = clamp(t, 0, state.duration);
+  }
+  draw();
+});
+canvas.addEventListener("dblclick", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const t = timeForX(x);
+  const seg = segments().find(sg => t >= sg.start && t < sg.end);
+  state.selectedSegStart = seg ? seg.start : null;
+  updateEditButtons();
+  draw();
+});
+
+$("splitBtn").addEventListener("click", () => { addCut(video.currentTime); updateEditButtons(); draw(); });
+$("toggleSegBtn").addEventListener("click", () => {
+  if (state.selectedSegStart === null) return;
+  const seg = segments().find(sg => Math.abs(sg.start - state.selectedSegStart) < 1e-3);
+  if (!seg) return;
+  if (isRangeRemoved(seg.start, seg.end)) subtractRemoved(seg.start, seg.end);
+  else addRemoved(seg.start, seg.end);
+  updateEditButtons(); draw();
+});
+$("clearEditsBtn").addEventListener("click", () => {
+  state.cutPoints = []; state.removed = []; state.selectedSegStart = null;
+  state.candidates.forEach(c => { if (c.status === "adopted") c.status = "pending"; });
+  updateEditButtons(); refreshReview(); draw();
+  setStatus("編集をリセットしました。");
+});
+
+$("detectBtn").addEventListener("click", () => { setStatus("無音検出中…"); setTimeout(detectSilence, 30); });
+$("prevBtn").addEventListener("click", () => selectCandidate(state.currentIndex - 1, true));
+$("nextBtn").addEventListener("click", () => selectCandidate(state.currentIndex + 1, true));
+$("playCandBtn").addEventListener("click", playCandidate);
+$("adoptBtn").addEventListener("click", () => { adoptCandidate(); });
+$("skipBtn").addEventListener("click", () => { skipCandidate(); });
+
+$("exportEdlBtn").addEventListener("click", exportEdl);
+$("exportVidBtn").addEventListener("click", exportVideo);
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT") return;
+  if (!state.candidates.length) return;
+  if (e.key === "ArrowLeft") { selectCandidate(state.currentIndex - 1, true); e.preventDefault(); }
+  else if (e.key === "ArrowRight") { selectCandidate(state.currentIndex + 1, true); e.preventDefault(); }
+  else if (e.key === " ") { playCandidate(); e.preventDefault(); }
+  else if (e.key === "Enter") { adoptCandidate(); e.preventDefault(); }
+  else if (e.key === "x" || e.key === "X") { skipCandidate(); e.preventDefault(); }
+});
+
+// expose for testing/automation
+window.__qt = state;
+
+// ---------- Boot ----------
+requestAnimationFrame(tick);
+draw();
+</script>
+</body>
+</html>
