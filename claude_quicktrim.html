@@ -352,6 +352,57 @@
   .candidate-row button.accept{color:var(--lime-deep);background:var(--lime-soft);}
   .candidate-row button.skip{color:var(--ink-soft);}
   .candidate-row button.accept:hover{background:var(--lime);}
+  .candidate-row{cursor:pointer;}
+  .candidate-row:hover{border-color:var(--lime-deep);background:var(--lime-soft);}
+  .candidate-row.current{border-color:var(--ink);background:rgba(34,34,31,.05);}
+  .candidate-row .badge{
+    font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap;
+  }
+  .badge.pending{background:var(--cut-bg);color:var(--cut-text);}
+  .badge.adopted{background:var(--lime-soft);color:var(--lime-deep);}
+  .badge.skipped{background:#EFE9DD;color:var(--ink-soft);}
+
+  /* silence review (1件ずつ確認) */
+  .silence-review{
+    margin-top:14px;
+    padding:14px 16px;
+    border:1px solid var(--hairline);
+    border-radius:10px;
+    background:var(--paper);
+  }
+  .review-head{
+    display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px;
+  }
+  .review-counter{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;}
+  .review-counts{font-size:12px;color:var(--ink-soft);}
+  .review-current{
+    background:var(--surface);border:1px solid var(--hairline);border-radius:8px;
+    padding:10px 12px;margin-bottom:10px;font-variant-numeric:tabular-nums;
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  }
+  .review-current .range{font-size:14px;}
+  .review-current .dur{font-size:12.5px;color:var(--ink-soft);}
+  .review-actions{display:flex;gap:8px;flex-wrap:wrap;}
+  .review-hint{font-size:12px;color:var(--ink-soft);margin-top:8px;}
+
+  /* selected/adopted/skipped candidate emphasis on the timeline */
+  .region.silence-adopted{
+    background:rgba(199,233,62,.30);
+    border-left:2px solid var(--lime-deep);
+    border-right:2px solid var(--lime-deep);
+  }
+  .region.silence-skipped{
+    background:repeating-linear-gradient(45deg, rgba(91,90,84,.10) 0 6px, rgba(91,90,84,.03) 6px 12px);
+    border-left:2px solid var(--hairline);
+    border-right:2px solid var(--hairline);
+  }
+  .region.silence-current{
+    background:rgba(216,90,48,.28);
+    border-left:3px solid var(--danger);
+    border-right:3px solid var(--danger);
+    box-shadow:inset 0 0 0 1px rgba(216,90,48,.5);
+    z-index:2;
+  }
 
   /* cut list */
   .cutlist-section h2{font-size:14.5px;font-weight:600;margin:0 0 10px;}
@@ -596,6 +647,28 @@
         <label id="minLenReadout">0.6秒</label>
       </div>
       <div class="silence-status" id="silenceStatus">まだ解析していません</div>
+
+      <div class="silence-review" id="silenceReview" style="display:none;">
+        <div class="review-head">
+          <div class="review-counter" id="reviewCounter">無音候補 0/0</div>
+          <div class="review-counts" id="reviewCounts"></div>
+        </div>
+        <div class="review-current" id="reviewCurrent"></div>
+        <div class="silence-controls">
+          <label>前余白（プレビュー）</label>
+          <input type="range" id="leadSlider" min="0" max="20" value="5">
+          <label id="leadReadout">0.5秒</label>
+        </div>
+        <div class="review-actions">
+          <button class="action" id="prevCandBtn">◀ 前へ</button>
+          <button class="action" id="nextCandBtn">次へ ▶</button>
+          <button class="action" id="playCandBtn">▶ 試聴</button>
+          <button class="action primary" id="adoptCandBtn">採用して削除</button>
+          <button class="action" id="skipCandBtn">スキップ</button>
+        </div>
+        <div class="review-hint">候補を選ぶと再生ヘッドが区間の少し前へ移動し、タイムライン上で強調表示されます。採用した候補だけが削除対象になります（採用は「削除区間リスト」やスキップで取り消せます）。</div>
+      </div>
+
       <div class="candidate-list" id="candidateList"></div>
     </div>
 
@@ -631,6 +704,7 @@
       </div>
       <div class="export-row">
         <button class="action primary" id="exportBtn">この内容で書き出す</button>
+        <button class="action" id="exportEdlBtn">EDL(JSON)を書き出す</button>
         <button class="action" id="previewSkipBtn">スキップ再生プレビュー</button>
         <button class="action" id="newFileBtn">別のファイルを開く</button>
       </div>
@@ -680,6 +754,18 @@
   const minLenReadout = document.getElementById('minLenReadout');
   const silenceStatus = document.getElementById('silenceStatus');
   const candidateList = document.getElementById('candidateList');
+  const silenceReview = document.getElementById('silenceReview');
+  const reviewCounter = document.getElementById('reviewCounter');
+  const reviewCounts = document.getElementById('reviewCounts');
+  const reviewCurrent = document.getElementById('reviewCurrent');
+  const leadSlider = document.getElementById('leadSlider');
+  const leadReadout = document.getElementById('leadReadout');
+  const prevCandBtn = document.getElementById('prevCandBtn');
+  const nextCandBtn = document.getElementById('nextCandBtn');
+  const playCandBtn = document.getElementById('playCandBtn');
+  const adoptCandBtn = document.getElementById('adoptCandBtn');
+  const skipCandBtn = document.getElementById('skipCandBtn');
+  const exportEdlBtn = document.getElementById('exportEdlBtn');
 
   let duration = 0;
   let cuts = []; // {start, end} -- 確定した削除区間
@@ -687,7 +773,10 @@
   let selectedClipIndex = null; // 現在選択中のクリップのインデックス
   let dragState = null; // {startX, startTime}
   let audioBuffer = null;
-  let silenceCandidates = []; // {start, end}
+  let silenceCandidates = []; // {id, start, end, status:'pending'|'adopted'|'skipped'}
+  let currentCandidateIndex = -1; // レビューUIで選択中の候補
+  let previewMode = false;        // 候補の前余白つきプレビュー再生中フラグ
+  let candidatePreviewEnd = null; // プレビュー停止時刻
   let objectUrl = null;
   let currentFile = null; // 読み込んだFileオブジェクト（書き出し時に使用）
 
@@ -734,7 +823,11 @@
       boundaries = [];
       selectedClipIndex = null;
       silenceCandidates = [];
+      currentCandidateIndex = -1;
+      previewMode = false;
+      candidatePreviewEnd = null;
       candidateList.innerHTML = '';
+      silenceReview.style.display = 'none';
       silenceStatus.textContent = 'まだ解析していません';
       origDurEl.textContent = fmt(duration);
       buildPlaceholderWaveform();
@@ -762,18 +855,28 @@
 
   // ---- transport ----
   playBtn.addEventListener('click', ()=>{
+    previewMode = false; candidatePreviewEnd = null;
     if(video.paused){ video.play(); playBtn.textContent='❚❚'; }
     else { video.pause(); playBtn.textContent='▶'; }
   });
   video.addEventListener('pause', ()=>{playBtn.textContent='▶';});
   video.addEventListener('play', ()=>{playBtn.textContent='❚❚';});
-  back5.addEventListener('click', ()=>{ video.currentTime = Math.max(0, video.currentTime-5); });
-  fwd5.addEventListener('click', ()=>{ video.currentTime = Math.min(duration, video.currentTime+5); });
+  back5.addEventListener('click', ()=>{ previewMode=false; video.currentTime = Math.max(0, video.currentTime-5); });
+  fwd5.addEventListener('click', ()=>{ previewMode=false; video.currentTime = Math.min(duration, video.currentTime+5); });
   speedSelect.addEventListener('change', ()=>{ video.playbackRate = parseFloat(speedSelect.value); });
 
   video.addEventListener('timeupdate', ()=>{
     timeReadout.textContent = fmt(video.currentTime)+' / '+fmt(duration);
     updatePlayhead();
+    // 候補の前余白つきプレビュー：区間の終端まで来たら停止
+    if(previewMode){
+      if(candidatePreviewEnd !== null && video.currentTime >= candidatePreviewEnd){
+        video.pause();
+        previewMode = false;
+        candidatePreviewEnd = null;
+      }
+      return; // プレビュー中はスキップ再生のロジックを動かさない
+    }
     // skip-preview: if currently inside a cut region while playing, jump past it
     if(!video.paused){
       for(const c of cuts){
@@ -867,6 +970,7 @@
   timeline.addEventListener('mousedown', e=>{
     if(e.target.closest('.handle')) return;
     if(e.target.closest('.clip')) return; // クリップ自体のクリックはclickイベントで処理
+    previewMode = false; candidatePreviewEnd = null;
     const t = xToTime(e.clientX);
     dragState = {startTime:t, current:t};
     selectionDraft.style.display='block';
@@ -977,7 +1081,30 @@
   }
 
   function removeCut(idx){
+    const removed = cuts[idx];
     cuts.splice(idx,1);
+    // 削除区間リストから取り消したとき、その範囲に含まれる採用済み候補を未処理へ戻す
+    if(removed){
+      silenceCandidates.forEach(c=>{
+        if(c.status==='adopted' && c.start >= removed.start-0.05 && c.end <= removed.end+0.05){
+          c.status='pending';
+        }
+      });
+    }
+    renderCuts();
+    updateSummary();
+    if(silenceCandidates.length) refreshReview();
+  }
+
+  // 指定区間[start,end]だけを削除区間から正確に取り除く（マージ済み区間も分割して対応）
+  function removeCutRange(start,end){
+    const out=[];
+    for(const c of cuts){
+      if(c.end <= start+0.001 || c.start >= end-0.001){ out.push(c); continue; }
+      if(c.start < start-0.001) out.push({start:c.start, end:start});
+      if(c.end > end+0.001) out.push({start:end, end:c.end});
+    }
+    cuts = out;
     renderCuts();
     updateSummary();
   }
@@ -1036,6 +1163,7 @@
       region.style.width = (timeToPct(c.end)-timeToPct(c.start))+'%';
       timeline.insertBefore(region, selectionDraft);
     });
+    renderSilenceMarkers();
     renderClips();
 
     if(cuts.length===0){
@@ -1119,44 +1247,157 @@
       if(runEnd-runStart >= minLen) candidates.push({start:runStart, end:runEnd});
     }
 
-    silenceCandidates = candidates;
+    silenceCandidates = candidates.map((c,i)=>({id:i+1, start:c.start, end:c.end, status:'pending'}));
+    currentCandidateIndex = silenceCandidates.length ? 0 : -1;
     renderCandidates();
+    if(silenceCandidates.length){
+      silenceReview.style.display = 'block';
+      selectCandidate(0, true);
+    } else {
+      silenceReview.style.display = 'none';
+    }
     silenceStatus.textContent = candidates.length
-      ? candidates.length+'件の無音候補が見つかりました'
+      ? candidates.length+'件の無音候補が見つかりました（下のレビューで1件ずつ確認できます）'
       : '無音候補は見つかりませんでした（しきい値を上げてみてください）';
   }
 
+  // 候補リスト（状態つきの一覧。行クリックでレビュー対象に切り替え）
   function renderCandidates(){
     candidateList.innerHTML = '';
-    timeline.querySelectorAll('.region.silence-suggest').forEach(el=>el.remove());
-
+    const statusJa = {pending:'未処理', adopted:'採用', skipped:'スキップ'};
     silenceCandidates.forEach((c,idx)=>{
       const row = document.createElement('div');
-      row.className='candidate-row';
-      row.innerHTML = `
-        <span class="dur">${(c.end-c.start).toFixed(1)}秒</span>
-        <span class="range">${fmt(c.start)} → ${fmt(c.end)}</span>
-        <button class="accept">採用</button>
-        <button class="skip">スキップ</button>
-      `;
-      row.querySelector('.accept').addEventListener('click', ()=>{
-        addCut(c.start, c.end);
-        row.remove();
-        marker.remove();
-      });
-      row.querySelector('.skip').addEventListener('click', ()=>{
-        row.remove();
-        marker.remove();
-      });
+      row.className = 'candidate-row' + (idx===currentCandidateIndex ? ' current' : '');
+      row.innerHTML =
+        '<span class="dur">'+(c.end-c.start).toFixed(1)+'秒</span>'+
+        '<span class="range">'+fmt(c.start)+' → '+fmt(c.end)+'</span>'+
+        '<span class="badge '+c.status+'">'+statusJa[c.status]+'</span>';
+      row.addEventListener('click', ()=>selectCandidate(idx, true));
       candidateList.appendChild(row);
+    });
+    renderSilenceMarkers();
+    refreshReview();
+  }
 
+  // タイムライン上の無音候補マーカー（状態色分け＋選択中の強調）
+  function renderSilenceMarkers(){
+    timeline.querySelectorAll('.region.silence-suggest, .region.silence-current, .region.silence-adopted, .region.silence-skipped')
+      .forEach(el=>el.remove());
+    silenceCandidates.forEach((c,idx)=>{
       const marker = document.createElement('div');
-      marker.className='region silence-suggest';
+      let cls = 'region silence-suggest';
+      if(idx===currentCandidateIndex) cls = 'region silence-current';
+      else if(c.status==='adopted') cls = 'region silence-adopted';
+      else if(c.status==='skipped') cls = 'region silence-skipped';
+      marker.className = cls;
       marker.style.left = timeToPct(c.start)+'%';
       marker.style.width = (timeToPct(c.end)-timeToPct(c.start))+'%';
       timeline.insertBefore(marker, selectionDraft);
     });
   }
+
+  // ---- 無音候補レビュー（1件ずつ確認） ----
+  function leadSeconds(){ return parseInt(leadSlider.value,10)/10; }
+
+  function refreshReview(){
+    const n = silenceCandidates.length;
+    if(n===0){ silenceReview.style.display='none'; return; }
+    silenceReview.style.display='block';
+    currentCandidateIndex = Math.min(Math.max(0,currentCandidateIndex), n-1);
+    const idx = currentCandidateIndex;
+    const c = silenceCandidates[idx];
+    const statusJa = {pending:'未処理', adopted:'採用（削除）', skipped:'スキップ'}[c.status];
+    reviewCounter.textContent = '無音候補 '+(idx+1)+'/'+n;
+    reviewCurrent.innerHTML =
+      '<span class="range">区間 '+fmt(c.start)+' → '+fmt(c.end)+'</span>'+
+      '<span class="dur">'+(c.end-c.start).toFixed(1)+'秒</span>'+
+      '<span class="badge '+c.status+'">'+statusJa+'</span>';
+    const adopted = silenceCandidates.filter(x=>x.status==='adopted').length;
+    const skipped = silenceCandidates.filter(x=>x.status==='skipped').length;
+    const pending = silenceCandidates.filter(x=>x.status==='pending').length;
+    reviewCounts.textContent = '採用 '+adopted+'・スキップ '+skipped+'・未処理 '+pending;
+    prevCandBtn.disabled = idx<=0;
+    nextCandBtn.disabled = idx>=n-1;
+    adoptCandBtn.textContent = c.status==='adopted' ? '採用を取り消す' : '採用して削除';
+  }
+
+  function selectCandidate(idx, seek){
+    if(idx<0 || idx>=silenceCandidates.length) return;
+    currentCandidateIndex = idx;
+    previewMode = false; candidatePreviewEnd = null;
+    if(seek){
+      const c = silenceCandidates[idx];
+      video.currentTime = Math.max(0, c.start - leadSeconds());
+    }
+    refreshReview();
+    renderSilenceMarkers();
+    // リストの current ハイライトを更新
+    const rows = candidateList.querySelectorAll('.candidate-row');
+    rows.forEach((r,i)=>r.classList.toggle('current', i===idx));
+  }
+
+  function playCandidate(){
+    const c = silenceCandidates[currentCandidateIndex];
+    if(!c) return;
+    video.currentTime = Math.max(0, c.start - leadSeconds());
+    candidatePreviewEnd = Math.min(duration, c.end + 0.12);
+    previewMode = true;
+    video.play();
+  }
+
+  function adoptCandidate(){
+    const c = silenceCandidates[currentCandidateIndex];
+    if(!c) return;
+    if(c.status==='adopted'){
+      // トグル：採用を取り消す（削除区間から正確に除去）
+      removeCutRange(c.start, c.end);
+      c.status='pending';
+      renderCandidates();
+      showToast('候補 '+c.id+' の採用を取り消しました');
+      return;
+    }
+    addCut(c.start, c.end);
+    c.status='adopted';
+    renderCandidates();
+    advanceToNextPending();
+  }
+
+  function skipCandidate(){
+    const c = silenceCandidates[currentCandidateIndex];
+    if(!c) return;
+    if(c.status==='adopted') removeCutRange(c.start, c.end);
+    c.status='skipped';
+    renderCandidates();
+    advanceToNextPending();
+  }
+
+  function advanceToNextPending(){
+    const n = silenceCandidates.length;
+    for(let k=1;k<=n;k++){
+      const j=(currentCandidateIndex+k)%n;
+      if(silenceCandidates[j].status==='pending'){ selectCandidate(j,true); return; }
+    }
+    refreshReview();
+    renderSilenceMarkers();
+  }
+
+  prevCandBtn.addEventListener('click', ()=>selectCandidate(currentCandidateIndex-1, true));
+  nextCandBtn.addEventListener('click', ()=>selectCandidate(currentCandidateIndex+1, true));
+  playCandBtn.addEventListener('click', playCandidate);
+  adoptCandBtn.addEventListener('click', adoptCandidate);
+  skipCandBtn.addEventListener('click', skipCandidate);
+  leadSlider.addEventListener('input', ()=>{ leadReadout.textContent = leadSeconds().toFixed(1)+'秒'; });
+
+  document.addEventListener('keydown', (e)=>{
+    const tag = (e.target.tagName||'').toLowerCase();
+    if(tag==='input' || tag==='select' || tag==='textarea') return;
+    if(silenceReview.style.display==='none' || !silenceCandidates.length) return;
+    if(e.key==='ArrowLeft'){ selectCandidate(currentCandidateIndex-1, true); e.preventDefault(); }
+    else if(e.key==='ArrowRight'){ selectCandidate(currentCandidateIndex+1, true); e.preventDefault(); }
+    else if(e.key===' '){ playCandidate(); e.preventDefault(); }
+    else if(e.key==='Enter'){ adoptCandidate(); e.preventDefault(); }
+    else if(e.key==='x' || e.key==='X'){ skipCandidate(); e.preventDefault(); }
+  });
 
   // ---- スキップ再生プレビュー（従来の簡易確認） ----
   previewSkipBtn.addEventListener('click', ()=>{
@@ -1290,6 +1531,37 @@
     }
     return keep.filter(r => r.end - r.start > 0.05);
   }
+
+  // ---- EDL(JSON) 書き出し（DaVinci前の粗編集判断を外部保存・共有するため） ----
+  function exportEdl(){
+    if(!duration){
+      showToast('動画が読み込まれていません');
+      return;
+    }
+    const keep = getKeepRanges();
+    const edl = {
+      tool: 'Quick Trim',
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      source: currentFile ? currentFile.name : null,
+      duration: duration,
+      boundaries: boundaries.slice(),
+      cuts: cuts.map(c=>({start:c.start, end:c.end})),
+      keep: keep.map(r=>({start:r.start, end:r.end})),
+      silenceCandidates: silenceCandidates.map(c=>({id:c.id, start:c.start, end:c.end, status:c.status})),
+    };
+    const blob = new Blob([JSON.stringify(edl, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const base = currentFile ? currentFile.name.replace(/\.[^.]+$/,'') : 'quicktrim';
+    a.href = url;
+    a.download = base + '_edl.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1000);
+    showToast('EDL(JSON)を書き出しました');
+  }
+  exportEdlBtn.addEventListener('click', exportEdl);
 
   exportBtn.addEventListener('click', async ()=>{
     if(!currentFile){
