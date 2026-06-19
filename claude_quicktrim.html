@@ -385,6 +385,19 @@
   .review-actions{display:flex;gap:8px;flex-wrap:wrap;}
   .review-hint{font-size:12px;color:var(--ink-soft);margin-top:8px;}
 
+  /* 旧候補リスト：レビューUIを本流にし、こちらは折りたたみで残す */
+  .candidate-fold{margin-top:12px;}
+  .candidate-fold > summary{
+    font-size:12.5px;color:var(--ink-soft);cursor:pointer;
+    list-style:none;padding:6px 2px;user-select:none;
+  }
+  .candidate-fold > summary::-webkit-details-marker{display:none;}
+  .candidate-fold > summary::before{content:"▸ ";}
+  .candidate-fold[open] > summary::before{content:"▾ ";}
+  .candidate-fold > summary:hover{color:var(--ink);}
+  .candidate-fold .candidate-list{margin-top:8px;}
+  .cutlist-row .tag.silence{background:#FBEAE3;color:var(--danger);}
+
   /* selected/adopted/skipped candidate emphasis on the timeline */
   .region.silence-adopted{
     background:rgba(199,233,62,.30);
@@ -669,7 +682,10 @@
         <div class="review-hint">候補を選ぶと再生ヘッドが区間の少し前へ移動し、タイムライン上で強調表示されます。採用した候補だけが削除対象になります（採用は「削除区間リスト」やスキップで取り消せます）。</div>
       </div>
 
-      <div class="candidate-list" id="candidateList"></div>
+      <details class="candidate-fold" id="candidateFold">
+        <summary>候補一覧をすべて表示（折りたたみ）</summary>
+        <div class="candidate-list" id="candidateList"></div>
+      </details>
     </div>
 
     <div class="cutlist-section">
@@ -879,7 +895,7 @@
     }
     // skip-preview: if currently inside a cut region while playing, jump past it
     if(!video.paused){
-      for(const c of cuts){
+      for(const c of effectiveCuts()){
         if(video.currentTime >= c.start && video.currentTime < c.end - 0.05){
           video.currentTime = c.end;
           break;
@@ -962,9 +978,30 @@
     return ranges;
   }
 
-  // 指定した時間がどの削除区間にも含まれているか
+  // 採用済み無音候補の区間（pending/adopted/skipped を唯一の真実とし、ここから導出する）
+  function adoptedIntervals(){
+    return silenceCandidates
+      .filter(c => c.status === 'adopted')
+      .map(c => ({start:c.start, end:c.end}));
+  }
+
+  // 実際に削除される区間 = 手動cuts ∪ 採用済み候補。マージ済みで返す。
+  function effectiveCuts(){
+    const all = cuts.concat(adoptedIntervals()).sort((a,b)=>a.start-b.start);
+    const merged = [];
+    for(const c of all){
+      if(merged.length && c.start <= merged[merged.length-1].end + 0.05){
+        merged[merged.length-1].end = Math.max(merged[merged.length-1].end, c.end);
+      } else {
+        merged.push({start:c.start, end:c.end});
+      }
+    }
+    return merged;
+  }
+
+  // 指定した時間が（実効的に）どの削除区間に含まれているか
   function isInCuts(t){
-    return cuts.some(c => t >= c.start-0.001 && t <= c.end+0.001);
+    return effectiveCuts().some(c => t >= c.start-0.001 && t <= c.end+0.001);
   }
 
   timeline.addEventListener('mousedown', e=>{
@@ -1051,13 +1088,17 @@
   });
 
   clearAllBtn.addEventListener('click', ()=>{
-    if(cuts.length===0 && boundaries.length===0) return;
+    const hasAdopted = silenceCandidates.some(c=>c.status==='adopted');
+    if(cuts.length===0 && boundaries.length===0 && !hasAdopted) return;
     if(confirm('すべての削除区間・分割をリセットしますか？')){
       cuts = [];
       boundaries = [];
       selectedClipIndex = null;
       deleteClipBtn.disabled = true;
+      // 採用済み無音候補も削除対象なので未処理に戻す（status が唯一の真実）
+      silenceCandidates.forEach(c=>{ if(c.status==='adopted') c.status='pending'; });
       renderClips();
+      renderCandidates();
       renderCuts();
       updateSummary();
     }
@@ -1080,31 +1121,19 @@
     updateSummary();
   }
 
-  function removeCut(idx){
-    const removed = cuts[idx];
+  // 手動削除区間（cuts）を1件取り消す。無音候補の採用状態は status 側が真実なので触らない。
+  function removeManualCut(idx){
     cuts.splice(idx,1);
-    // 削除区間リストから取り消したとき、その範囲に含まれる採用済み候補を未処理へ戻す
-    if(removed){
-      silenceCandidates.forEach(c=>{
-        if(c.status==='adopted' && c.start >= removed.start-0.05 && c.end <= removed.end+0.05){
-          c.status='pending';
-        }
-      });
-    }
     renderCuts();
     updateSummary();
-    if(silenceCandidates.length) refreshReview();
   }
 
-  // 指定区間[start,end]だけを削除区間から正確に取り除く（マージ済み区間も分割して対応）
-  function removeCutRange(start,end){
-    const out=[];
-    for(const c of cuts){
-      if(c.end <= start+0.001 || c.start >= end-0.001){ out.push(c); continue; }
-      if(c.start < start-0.001) out.push({start:c.start, end:start});
-      if(c.end > end+0.001) out.push({start:end, end:c.end});
-    }
-    cuts = out;
+  // 無音候補の採用を取り消す（唯一の真実である status を pending に戻すだけ）
+  function unadoptCandidate(id){
+    const c = silenceCandidates.find(x => x.id === id);
+    if(!c || c.status !== 'adopted') return;
+    c.status = 'pending';
+    renderCandidates();
     renderCuts();
     updateSummary();
   }
@@ -1156,7 +1185,8 @@
   function renderCuts(){
     // clear regions from timeline (keep waveform/playhead/draft)
     timeline.querySelectorAll('.region').forEach(el=>el.remove());
-    cuts.forEach(c=>{
+    // 実効的な削除区間（手動 ∪ 採用済み無音）をグレー表示
+    effectiveCuts().forEach(c=>{
       const region = document.createElement('div');
       region.className='region';
       region.style.left = timeToPct(c.start)+'%';
@@ -1165,28 +1195,44 @@
     });
     renderSilenceMarkers();
     renderClips();
+    renderCutList();
+  }
 
-    if(cuts.length===0){
+  // 削除区間リスト：手動削除と「採用した無音候補」を出所つきで一覧表示。
+  // 取り消し操作はそれぞれの真実（cuts / status）に対して行う。
+  function renderCutList(){
+    const rows = [];
+    cuts.forEach((c,idx)=>rows.push({kind:'manual', idx, start:c.start, end:c.end}));
+    silenceCandidates.forEach(c=>{
+      if(c.status==='adopted') rows.push({kind:'silence', id:c.id, start:c.start, end:c.end});
+    });
+    rows.sort((a,b)=>a.start-b.start);
+
+    if(rows.length===0){
       cutlistEl.innerHTML = '<div class="empty-note">まだ削除区間がありません。タイムラインをドラッグして選択するか、分割してクリップを選んでください。</div>';
       return;
     }
     cutlistEl.innerHTML = '';
-    cuts.forEach((c,idx)=>{
+    rows.forEach(r=>{
       const row = document.createElement('div');
       row.className='cutlist-row';
-      row.innerHTML = `
-        <span class="tag">削除</span>
-        <span class="range">${fmt(c.start)} → ${fmt(c.end)}</span>
-        <span class="dur">${(c.end-c.start).toFixed(1)}秒</span>
-        <button class="remove" aria-label="削除区間を取り消す">✕</button>
-      `;
-      row.querySelector('.remove').addEventListener('click', ()=>removeCut(idx));
+      const tagText = r.kind==='silence' ? '無音採用' : '削除';
+      const tagCls = r.kind==='silence' ? 'tag silence' : 'tag';
+      row.innerHTML =
+        '<span class="'+tagCls+'">'+tagText+'</span>'+
+        '<span class="range">'+fmt(r.start)+' → '+fmt(r.end)+'</span>'+
+        '<span class="dur">'+(r.end-r.start).toFixed(1)+'秒</span>'+
+        '<button class="remove" aria-label="削除区間を取り消す">✕</button>';
+      row.querySelector('.remove').addEventListener('click', ()=>{
+        if(r.kind==='silence') unadoptCandidate(r.id);
+        else removeManualCut(r.idx);
+      });
       cutlistEl.appendChild(row);
     });
   }
 
   function updateSummary(){
-    const cutTotal = cuts.reduce((s,c)=>s+(c.end-c.start),0);
+    const cutTotal = effectiveCuts().reduce((s,c)=>s+(c.end-c.start),0);
     cutTotalEl.textContent = fmt(cutTotal);
     finalDurEl.textContent = fmt(Math.max(0,duration-cutTotal));
   }
@@ -1280,15 +1326,18 @@
   }
 
   // タイムライン上の無音候補マーカー（状態色分け＋選択中の強調）
+  // 採用済みは実効削除区間（グレー）として描画されるので、ここでは個別バンドを重ねない
+  // （選択中のものだけは位置確認のため赤ハイライトを出す）。
   function renderSilenceMarkers(){
     timeline.querySelectorAll('.region.silence-suggest, .region.silence-current, .region.silence-adopted, .region.silence-skipped')
       .forEach(el=>el.remove());
     silenceCandidates.forEach((c,idx)=>{
-      const marker = document.createElement('div');
-      let cls = 'region silence-suggest';
+      let cls;
       if(idx===currentCandidateIndex) cls = 'region silence-current';
-      else if(c.status==='adopted') cls = 'region silence-adopted';
+      else if(c.status==='adopted') return; // グレーの削除区間として表示済み
       else if(c.status==='skipped') cls = 'region silence-skipped';
+      else cls = 'region silence-suggest';
+      const marker = document.createElement('div');
       marker.className = cls;
       marker.style.left = timeToPct(c.start)+'%';
       marker.style.width = (timeToPct(c.end)-timeToPct(c.start))+'%';
@@ -1345,29 +1394,33 @@
     video.play();
   }
 
+  // 採用/スキップ/取り消しは status を更新するだけ。削除区間は status から導出する。
   function adoptCandidate(){
     const c = silenceCandidates[currentCandidateIndex];
     if(!c) return;
     if(c.status==='adopted'){
-      // トグル：採用を取り消す（削除区間から正確に除去）
-      removeCutRange(c.start, c.end);
+      // トグル：採用を取り消す（status を pending に戻すのみ）
       c.status='pending';
       renderCandidates();
+      renderCuts();
+      updateSummary();
       showToast('候補 '+c.id+' の採用を取り消しました');
       return;
     }
-    addCut(c.start, c.end);
     c.status='adopted';
     renderCandidates();
+    renderCuts();
+    updateSummary();
     advanceToNextPending();
   }
 
   function skipCandidate(){
     const c = silenceCandidates[currentCandidateIndex];
     if(!c) return;
-    if(c.status==='adopted') removeCutRange(c.start, c.end);
     c.status='skipped';
     renderCandidates();
+    renderCuts();
+    updateSummary();
     advanceToNextPending();
   }
 
@@ -1401,7 +1454,7 @@
 
   // ---- スキップ再生プレビュー（従来の簡易確認） ----
   previewSkipBtn.addEventListener('click', ()=>{
-    if(cuts.length===0){
+    if(effectiveCuts().length===0){
       showToast('削除区間がありません。そのまま全体を再生します。');
     } else {
       showToast('残す区間だけをスキップ再生でプレビューします');
@@ -1515,9 +1568,9 @@
     });
   }
 
-  // 削除区間(cuts)の逆から「残す区間」を計算
+  // 実効削除区間（手動 ∪ 採用済み無音）の逆から「残す区間」を計算
   function getKeepRanges(){
-    const sorted = [...cuts].sort((a,b)=>a.start-b.start);
+    const sorted = effectiveCuts();
     const keep = [];
     let cursor = 0;
     for(const c of sorted){
@@ -1546,7 +1599,8 @@
       source: currentFile ? currentFile.name : null,
       duration: duration,
       boundaries: boundaries.slice(),
-      cuts: cuts.map(c=>({start:c.start, end:c.end})),
+      manualCuts: cuts.map(c=>({start:c.start, end:c.end})),
+      cuts: effectiveCuts(),
       keep: keep.map(r=>({start:r.start, end:r.end})),
       silenceCandidates: silenceCandidates.map(c=>({id:c.id, start:c.start, end:c.end, status:c.status})),
     };
